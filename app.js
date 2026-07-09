@@ -441,7 +441,7 @@ function runCheckin(machine) {
 
 // ---------- nav + search ----------
 
-document.getElementById("navMachines").addEventListener("click", () => {
+function goToListView() {
   state.view = "list";
   document.getElementById("navMachines").classList.add("active");
   document.getElementById("navMap").classList.remove("active");
@@ -449,7 +449,10 @@ document.getElementById("navMachines").addEventListener("click", () => {
   document.getElementById("mapView").style.display = "none";
   document.querySelector(".search-wrap").style.display = "block";
   document.querySelector(".chips-row").style.display = "flex";
-});
+}
+
+document.getElementById("navMachines").addEventListener("click", goToListView);
+document.getElementById("mapCloseBtn").addEventListener("click", goToListView);
 
 document.getElementById("navMap").addEventListener("click", () => {
   state.view = "map";
@@ -629,46 +632,91 @@ function openAddMachineForm() {
   document.getElementById("saveMachineBtn").onclick = saveNewMachine;
 }
 
+let toastTimeout = null;
+function showToast(message, type = "info", duration = 2500) {
+  const toast = document.getElementById("saveToast");
+  toast.textContent = message;
+  toast.className = `save-toast show ${type}`;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove("show");
+  }, duration);
+}
+
+function readMachineForm() {
+  return {
+    name: document.getElementById("fName").value.trim(),
+    tag: document.getElementById("fTag").value.trim(),
+    type: document.getElementById("fType").value,
+    address: document.getElementById("fAddress").value.trim() || "Localização não informada",
+    lat: parseFloat(document.getElementById("fLat").value) || -23.5613,
+    lng: parseFloat(document.getElementById("fLng").value) || -46.6565,
+    horimetro: parseFloat(document.getElementById("fHorimetro").value) || 0,
+    dataHorimetro: document.getElementById("fDataHorimetro").value || "",
+    pesoTon: parseFloat(document.getElementById("fPesoTon").value) || 0,
+    photoFile: document.getElementById("fPhoto").files[0],
+  };
+}
+
 async function saveNewMachine() {
-  const name = document.getElementById("fName").value.trim();
-  const tag = document.getElementById("fTag").value.trim();
-  const type = document.getElementById("fType").value;
-  const address = document.getElementById("fAddress").value.trim() || "Localização não informada";
-  const lat = parseFloat(document.getElementById("fLat").value) || -23.5613;
-  const lng = parseFloat(document.getElementById("fLng").value) || -46.6565;
-  const horimetro = parseFloat(document.getElementById("fHorimetro").value) || 0;
-  const dataHorimetro = document.getElementById("fDataHorimetro").value || "";
-  const pesoTon = parseFloat(document.getElementById("fPesoTon").value) || 0;
-  const photoFile = document.getElementById("fPhoto").files[0];
+  const f = readMachineForm();
   const statusEl = document.getElementById("saveStatus");
 
-  if (!name || !tag) {
+  if (!f.name || !f.tag) {
     statusEl.textContent = "Preencha ao menos nome e TAG.";
     return;
   }
-
   if (!USING_REAL_BACKEND) {
     statusEl.textContent = "Cadastro real desativado: configure a API_URL em config.js primeiro.";
     return;
   }
 
-  statusEl.textContent = "Salvando na planilha...";
-  try {
-    const payload = { name, tag, type, address, lat, lng, horimetro, dataHorimetro, pesoTon };
-    if (photoFile) {
-      payload.photoBase64 = await fileToBase64(photoFile);
-      payload.photoMimeType = photoFile.type;
+  const tempId = "temp-" + Date.now();
+  const tempMachine = {
+    id: tempId,
+    tag: f.tag,
+    name: f.name,
+    type: f.type,
+    status: "operando",
+    address: f.address,
+    lat: f.lat,
+    lng: f.lng,
+    lastUpdate: new Date().toISOString().slice(0, 10),
+    photoUrl: "",
+    photoInitials: f.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase(),
+    photoColor: "#f97316",
+    horimetro: f.horimetro,
+    pesoTon: f.pesoTon,
+    dataHorimetro: f.dataHorimetro,
+  };
+
+  // otimista: já aparece na tela e fecha o formulário, sem esperar a planilha
+  MACHINES.push(tempMachine);
+  closeModal();
+  renderChips();
+  renderList();
+  if (state.view === "map") renderMapMarkers();
+  showToast("Salvando na planilha...", "info", 60000);
+
+  (async () => {
+    try {
+      const payload = { name: f.name, tag: f.tag, type: f.type, address: f.address, lat: f.lat, lng: f.lng, horimetro: f.horimetro, dataHorimetro: f.dataHorimetro, pesoTon: f.pesoTon };
+      if (f.photoFile) {
+        payload.photoBase64 = await fileToBase64(f.photoFile);
+        payload.photoMimeType = f.photoFile.type;
+      }
+      await createMachineInSheet(payload);
+      MACHINES = await fetchMachinesFromSheet();
+      renderChips();
+      renderList();
+      if (state.view === "map") renderMapMarkers();
+      showToast("Máquina salva ✓", "success");
+    } catch (err) {
+      MACHINES = MACHINES.filter((m) => m.id !== tempId);
+      renderList();
+      showToast("Erro ao salvar. Tente novamente.", "error", 4000);
     }
-    await createMachineInSheet(payload);
-    statusEl.textContent = "Atualizando lista...";
-    MACHINES = await fetchMachinesFromSheet();
-    closeModal();
-    renderChips();
-    renderList();
-    if (state.view === "map") renderMapMarkers();
-  } catch (err) {
-    statusEl.textContent = "Erro de conexão com o Sheets.";
-  }
+  })();
 }
 
 // ---------- edit machine ----------
@@ -716,46 +764,63 @@ function openEditMachineForm(machine) {
 }
 
 async function saveEditedMachine(id) {
-  const name = document.getElementById("fName").value.trim();
-  const tag = document.getElementById("fTag").value.trim();
-  const type = document.getElementById("fType").value;
+  const f = readMachineForm();
   const status = document.getElementById("fStatus").value;
-  const address = document.getElementById("fAddress").value.trim();
-  const lat = document.getElementById("fLat").value.trim();
-  const lng = document.getElementById("fLng").value.trim();
-  const horimetro = document.getElementById("fHorimetro").value.trim();
-  const dataHorimetro = document.getElementById("fDataHorimetro").value || "";
-  const pesoTon = document.getElementById("fPesoTon").value.trim();
-  const photoFile = document.getElementById("fPhoto").files[0];
   const statusEl = document.getElementById("saveStatus");
 
-  if (!name || !tag) {
+  if (!f.name || !f.tag) {
     statusEl.textContent = "Preencha ao menos nome e TAG.";
     return;
   }
-
   if (!USING_REAL_BACKEND) {
     statusEl.textContent = "Edição real desativada: configure a API_URL em config.js primeiro.";
     return;
   }
 
-  statusEl.textContent = "Salvando alterações...";
-  try {
-    const payload = { id, name, tag, type, status, address, lat, lng, horimetro, dataHorimetro, pesoTon };
-    if (photoFile) {
-      payload.photoBase64 = await fileToBase64(photoFile);
-      payload.photoMimeType = photoFile.type;
-    }
-    await updateMachineInSheet(payload);
-    statusEl.textContent = "Atualizando lista...";
-    MACHINES = await fetchMachinesFromSheet();
-    closeModal();
-    renderChips();
-    renderList();
-    if (state.view === "map") renderMapMarkers();
-  } catch (err) {
-    statusEl.textContent = "Erro de conexão com o Sheets.";
+  const machine = MACHINES.find((m) => m.id === id);
+  const previous = machine ? { ...machine } : null;
+
+  // otimista: aplica as mudanças na tela na hora
+  if (machine) {
+    Object.assign(machine, {
+      name: f.name,
+      tag: f.tag,
+      type: f.type,
+      status,
+      address: f.address,
+      lat: f.lat,
+      lng: f.lng,
+      horimetro: f.horimetro,
+      dataHorimetro: f.dataHorimetro,
+      pesoTon: f.pesoTon,
+      photoInitials: f.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase(),
+    });
   }
+  closeModal();
+  renderChips();
+  renderList();
+  if (state.view === "map") renderMapMarkers();
+  showToast("Salvando alterações...", "info", 60000);
+
+  (async () => {
+    try {
+      const payload = { id, name: f.name, tag: f.tag, type: f.type, status, address: f.address, lat: f.lat, lng: f.lng, horimetro: f.horimetro, dataHorimetro: f.dataHorimetro, pesoTon: f.pesoTon };
+      if (f.photoFile) {
+        payload.photoBase64 = await fileToBase64(f.photoFile);
+        payload.photoMimeType = f.photoFile.type;
+      }
+      await updateMachineInSheet(payload);
+      MACHINES = await fetchMachinesFromSheet();
+      renderChips();
+      renderList();
+      if (state.view === "map") renderMapMarkers();
+      showToast("Alterações salvas ✓", "success");
+    } catch (err) {
+      if (machine && previous) Object.assign(machine, previous);
+      renderList();
+      showToast("Erro ao salvar. Tente novamente.", "error", 4000);
+    }
+  })();
 }
 
 // ---------- boot ----------
