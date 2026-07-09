@@ -314,6 +314,19 @@ html, body {
 .popup-title { font-weight: 700; font-size: 13.5px; margin-bottom: 2px; }
 .popup-type { color: var(--link); font-size: 12px; margin-bottom: 4px; }
 .popup-status { font-size: 11px; font-weight: 700; }
+.popup-tag { font-size: 11px; color: #9a9aa5; margin-top: 2px; }
+.popup-details-btn {
+  margin-top: 8px;
+  background: #f97316;
+  color: #1a0f00;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-weight: 700;
+  font-size: 11.5px;
+  cursor: pointer;
+  width: 100%;
+}
 
 /* FAB */
 .fab {

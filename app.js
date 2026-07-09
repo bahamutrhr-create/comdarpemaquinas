@@ -8,6 +8,8 @@ const STATUS_LABEL = {
 let state = {
   view: "list",     // "list" | "map"
   selectedTypes: [], // vazio = todos os tipos
+  selectedAddresses: [], // vazio = todas as obras
+  selectedStatuses: [], // vazio = todos os status
   sortBy: "none",    // "none" | "horimetro_desc" | "horimetro_asc"
   search: "",
 };
@@ -33,6 +35,10 @@ function filteredMachines() {
   let list = MACHINES.filter((m) => {
     const matchesType =
       state.selectedTypes.length === 0 || state.selectedTypes.includes(m.type);
+    const matchesAddress =
+      state.selectedAddresses.length === 0 || state.selectedAddresses.includes(m.address);
+    const matchesStatus =
+      state.selectedStatuses.length === 0 || state.selectedStatuses.includes(m.status);
     const q = state.search.trim().toLowerCase();
     const matchesSearch =
       !q ||
@@ -40,7 +46,7 @@ function filteredMachines() {
       m.tag.toLowerCase().includes(q) ||
       m.type.toLowerCase().includes(q) ||
       m.address.toLowerCase().includes(q);
-    return matchesType && matchesSearch;
+    return matchesType && matchesAddress && matchesStatus && matchesSearch;
   });
 
   if (state.sortBy === "horimetro_desc") {
@@ -56,11 +62,16 @@ function filteredMachines() {
 
 function renderChips() {
   const row = document.getElementById("chipRow");
-  const isAll = state.selectedTypes.length === 0;
+  const isAll =
+    state.selectedTypes.length === 0 &&
+    state.selectedAddresses.length === 0 &&
+    state.selectedStatuses.length === 0;
   row.innerHTML = `<button class="chip ${isAll ? "active" : ""}" id="chipTodas">Todas</button>`;
 
   document.getElementById("chipTodas").addEventListener("click", () => {
     state.selectedTypes = [];
+    state.selectedAddresses = [];
+    state.selectedStatuses = [];
     state.sortBy = "none";
     renderChips();
     renderFilterButton();
@@ -74,7 +85,11 @@ function renderChips() {
 function renderFilterButton() {
   const btn = document.getElementById("filterBtn");
   const badge = document.getElementById("filterBadge");
-  const activeCount = state.selectedTypes.length + (state.sortBy !== "none" ? 1 : 0);
+  const activeCount =
+    state.selectedTypes.length +
+    state.selectedAddresses.length +
+    state.selectedStatuses.length +
+    (state.sortBy !== "none" ? 1 : 0);
 
   if (activeCount > 0) {
     btn.classList.add("has-filters");
@@ -119,8 +134,8 @@ function renderList() {
               ${m.address}
             </div>
             <div class="meta-row">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              ${timeAgo(m.lastUpdate)}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+              TAG ${m.tag}
             </div>
             <div class="meta-row">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"></path><path d="M12 12V8"></path></svg>
@@ -221,12 +236,13 @@ function renderGoogleMapMarkers() {
       content: `<div style="font-family:sans-serif;">
         <strong>${m.name}</strong><br/>
         <span style="color:#6ea8e8;">${m.type}</span><br/>
-        <span style="color:${color};font-weight:bold;">${STATUS_LABEL[m.status]}</span>
+        <span style="color:${color};font-weight:bold;">${STATUS_LABEL[m.status]}</span><br/>
+        <span>TAG ${m.tag}</span><br/>
+        <button onclick="openMachineDetailById('${m.id}')" style="margin-top:6px;background:#f97316;color:#1a0f00;border:none;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer;">Ver detalhes completos</button>
       </div>`,
     });
     marker.addListener("click", () => {
       info.open(googleMap, marker);
-      openModal(m);
     });
     googleMarkers.push(marker);
     bounds.extend(marker.getPosition());
@@ -300,6 +316,11 @@ function machineMarkerIcon(m) {
   });
 }
 
+window.openMachineDetailById = (id) => {
+  const m = MACHINES.find((x) => x.id === id);
+  if (m) openModal(m);
+};
+
 function renderLeafletMapMarkers() {
   markerLayer.clearLayers();
   const list = filteredMachines();
@@ -312,8 +333,9 @@ function renderLeafletMapMarkers() {
       <div class="popup-title">${m.name}</div>
       <div class="popup-type">${m.type}</div>
       <div class="popup-status" style="color:${color}">${STATUS_LABEL[m.status]}</div>
+      <div class="popup-tag">TAG ${m.tag}</div>
+      <button class="popup-details-btn" onclick="openMachineDetailById('${m.id}')">Ver detalhes completos</button>
     `);
-    marker.on("click", () => openModal(m));
     markerLayer.addLayer(marker);
     bounds.push([m.lat, m.lng]);
   });
@@ -466,10 +488,12 @@ function openFilterPanel() {
     { value: "horimetro_asc", label: "Horímetro (menor primeiro)" },
   ];
 
+  const uniqueAddresses = Array.from(new Set(MACHINES.map((m) => m.address))).sort();
+
   modal.innerHTML = `
     <button class="modal-close" id="modalClose">&times;</button>
     <h2>Filtrar máquinas</h2>
-    <div class="modal-sub">Selecione um ou mais tipos e a ordenação</div>
+    <div class="modal-sub">Selecione um ou mais critérios</div>
 
     <div class="filter-section-title">Ordenar por</div>
     <div class="sort-options" id="sortOptions">
@@ -479,6 +503,31 @@ function openFilterPanel() {
         <label class="sort-option ${state.sortBy === o.value ? "selected" : ""}">
           <input type="radio" name="sortBy" value="${o.value}" ${state.sortBy === o.value ? "checked" : ""} />
           ${o.label}
+        </label>`
+        )
+        .join("")}
+    </div>
+
+    <div class="filter-section-title">Status</div>
+    <div class="type-checkbox-list" id="statusCheckboxList">
+      <label class="type-checkbox">
+        <input type="checkbox" value="operando" ${state.selectedStatuses.includes("operando") ? "checked" : ""} />
+        Operando
+      </label>
+      <label class="type-checkbox">
+        <input type="checkbox" value="nao_operando" ${state.selectedStatuses.includes("nao_operando") ? "checked" : ""} />
+        Não operando
+      </label>
+    </div>
+
+    <div class="filter-section-title">Obra</div>
+    <div class="type-checkbox-list" id="addressCheckboxList">
+      ${uniqueAddresses
+        .map(
+          (a) => `
+        <label class="type-checkbox">
+          <input type="checkbox" value="${a}" ${state.selectedAddresses.includes(a) ? "checked" : ""} />
+          ${a}
         </label>`
         )
         .join("")}
@@ -506,9 +555,17 @@ function openFilterPanel() {
     const checkedTypes = Array.from(
       modal.querySelectorAll('#typeCheckboxList input[type="checkbox"]:checked')
     ).map((cb) => cb.value);
+    const checkedAddresses = Array.from(
+      modal.querySelectorAll('#addressCheckboxList input[type="checkbox"]:checked')
+    ).map((cb) => cb.value);
+    const checkedStatuses = Array.from(
+      modal.querySelectorAll('#statusCheckboxList input[type="checkbox"]:checked')
+    ).map((cb) => cb.value);
     const sortValue = modal.querySelector('input[name="sortBy"]:checked').value;
 
     state.selectedTypes = checkedTypes;
+    state.selectedAddresses = checkedAddresses;
+    state.selectedStatuses = checkedStatuses;
     state.sortBy = sortValue;
 
     closeModal();
@@ -519,6 +576,8 @@ function openFilterPanel() {
 
   document.getElementById("clearFilterBtn").onclick = () => {
     state.selectedTypes = [];
+    state.selectedAddresses = [];
+    state.selectedStatuses = [];
     state.sortBy = "none";
     closeModal();
     renderChips();
