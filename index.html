@@ -3,10 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Lista de Máquinas</title>
+<title>Máquinas</title>
 <meta name="theme-color" content="#0b0b0e" />
+<link rel="icon" href="logo.png" type="image/png" />
 <link rel="manifest" href="manifest.json" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -16,10 +19,10 @@
   <!-- HEADER -->
   <header class="header">
     <div class="header-icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+      <img src="logo.png" alt="COMDARPE" class="header-logo" />
     </div>
     <div class="header-text">
-      <h1>Lista de Máquinas</h1>
+      <h1>Máquinas</h1>
       <p id="machineCount">6 máquinas rastreadas</p>
     </div>
   </header>
@@ -31,8 +34,15 @@
   </div>
 
   <!-- FILTER CHIPS -->
-  <div class="chips" id="chipRow">
-    <button class="chip active" data-type="Todas">Todas</button>
+  <div class="chips-row">
+    <div class="chips" id="chipRow">
+      <button class="chip active" data-type="Todas">Todas</button>
+    </div>
+    <button class="filter-btn" id="filterBtn">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+      Filtro
+      <span class="filter-badge" id="filterBadge" style="display:none;"></span>
+    </button>
   </div>
 
   <!-- LIST VIEW -->
@@ -68,6 +78,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="config.js"></script>
 <script src="sheets.js"></script>

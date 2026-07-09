@@ -5,8 +5,8 @@
  * 1. Crie uma Planilha Google nova.
  * 2. Renomeie a primeira aba para exatamente:  Maquinas
  * 3. Na linha 1, cole estes cabeçalhos (uma coluna cada, na ordem):
- *    id | tag | name | type | status | address | lat | lng | lastUpdate | photoUrl | photoInitials | photoColor | horimetro
- *    (se sua planilha já existia antes, só adicione "horimetro" na próxima coluna livre, no fim)
+ *    id | tag | name | type | status | address | lat | lng | lastUpdate | photoUrl | photoInitials | photoColor | horimetro | pesoTon | dataHorimetro
+ *    (se sua planilha já existia antes, só adicione as colunas novas na sequência, no fim)
  * 4. Menu Extensões > Apps Script.
  * 5. Apague o conteúdo padrão de Code.gs e cole este arquivo inteiro.
  * 6. Clique em "Implantar" > "Nova implantação" > tipo "App da Web".
@@ -68,7 +68,8 @@ function getSheet_() {
 
 const HEADERS = [
   "id", "tag", "name", "type", "status", "address",
-  "lat", "lng", "lastUpdate", "photoUrl", "photoInitials", "photoColor", "horimetro",
+  "lat", "lng", "lastUpdate", "photoUrl", "photoInitials", "photoColor",
+  "horimetro", "pesoTon", "dataHorimetro",
 ];
 
 function listMachines_() {
@@ -86,6 +87,10 @@ function rowToMachine_(r) {
   obj.lat = Number(obj.lat);
   obj.lng = Number(obj.lng);
   obj.horimetro = Number(obj.horimetro) || 0;
+  obj.pesoTon = Number(obj.pesoTon) || 0;
+  if (obj.dataHorimetro instanceof Date) {
+    obj.dataHorimetro = Utilities.formatDate(obj.dataHorimetro, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
   if (obj.lastUpdate instanceof Date) {
     obj.lastUpdate = Utilities.formatDate(obj.lastUpdate, Session.getScriptTimeZone(), "yyyy-MM-dd");
   }
@@ -146,6 +151,8 @@ function createMachine_(body) {
     initialsFrom_(body.name || "??"),
     colorFor_(body.name || id),
     body.horimetro || 0,
+    body.pesoTon || 0,
+    body.dataHorimetro || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd"),
   ];
 
   sheet.appendRow(row);
@@ -172,6 +179,12 @@ function updateMachine_(body) {
   }
   if (body.horimetro !== undefined && body.horimetro !== "") {
     sheet.getRange(rowIndex, HEADERS.indexOf("horimetro") + 1).setValue(Number(body.horimetro));
+  }
+  if (body.pesoTon !== undefined && body.pesoTon !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("pesoTon") + 1).setValue(Number(body.pesoTon));
+  }
+  if (body.dataHorimetro !== undefined && body.dataHorimetro !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("dataHorimetro") + 1).setValue(body.dataHorimetro);
   }
 
   if (body.name) {

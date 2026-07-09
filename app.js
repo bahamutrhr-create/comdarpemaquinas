@@ -7,7 +7,8 @@ const STATUS_LABEL = {
 
 let state = {
   view: "list",     // "list" | "map"
-  typeFilter: "Todas",
+  selectedTypes: [], // vazio = todos os tipos
+  sortBy: "none",    // "none" | "horimetro_desc" | "horimetro_asc"
   search: "",
 };
 
@@ -29,9 +30,9 @@ function timeAgo(dateStr) {
 }
 
 function filteredMachines() {
-  return MACHINES.filter((m) => {
+  let list = MACHINES.filter((m) => {
     const matchesType =
-      state.typeFilter === "Todas" || m.type === state.typeFilter;
+      state.selectedTypes.length === 0 || state.selectedTypes.includes(m.type);
     const q = state.search.trim().toLowerCase();
     const matchesSearch =
       !q ||
@@ -41,27 +42,48 @@ function filteredMachines() {
       m.address.toLowerCase().includes(q);
     return matchesType && matchesSearch;
   });
+
+  if (state.sortBy === "horimetro_desc") {
+    list = list.slice().sort((a, b) => (b.horimetro || 0) - (a.horimetro || 0));
+  } else if (state.sortBy === "horimetro_asc") {
+    list = list.slice().sort((a, b) => (a.horimetro || 0) - (b.horimetro || 0));
+  }
+
+  return list;
 }
 
 // ---------- chips ----------
 
 function renderChips() {
   const row = document.getElementById("chipRow");
-  const types = ["Todas", ...MACHINE_TYPES];
-  row.innerHTML = types
-    .map(
-      (t) =>
-        `<button class="chip ${t === state.typeFilter ? "active" : ""}" data-type="${t}">${t}</button>`
-    )
-    .join("");
-  row.querySelectorAll(".chip").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.typeFilter = btn.dataset.type;
-      renderChips();
-      renderList();
-      if (state.view === "map") renderMapMarkers();
-    });
+  const isAll = state.selectedTypes.length === 0;
+  row.innerHTML = `<button class="chip ${isAll ? "active" : ""}" id="chipTodas">Todas</button>`;
+
+  document.getElementById("chipTodas").addEventListener("click", () => {
+    state.selectedTypes = [];
+    state.sortBy = "none";
+    renderChips();
+    renderFilterButton();
+    renderList();
+    if (state.view === "map") renderMapMarkers();
   });
+
+  renderFilterButton();
+}
+
+function renderFilterButton() {
+  const btn = document.getElementById("filterBtn");
+  const badge = document.getElementById("filterBadge");
+  const activeCount = state.selectedTypes.length + (state.sortBy !== "none" ? 1 : 0);
+
+  if (activeCount > 0) {
+    btn.classList.add("has-filters");
+    badge.style.display = "flex";
+    badge.textContent = activeCount;
+  } else {
+    btn.classList.remove("has-filters");
+    badge.style.display = "none";
+  }
 }
 
 // ---------- list view ----------
@@ -230,8 +252,52 @@ function initLeafletMap() {
     attribution: "© OpenStreetMap",
     maxZoom: 19,
   }).addTo(leafletMap);
-  markerLayer = L.layerGroup().addTo(leafletMap);
+
+  markerLayer = L.markerClusterGroup({
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+    maxClusterRadius: 55,
+    iconCreateFunction: (cluster) => {
+      const count = cluster.getChildCount();
+      return L.divIcon({
+        className: "",
+        html: `<div style="background:#16161b;border:2.5px solid #f97316;color:#f2f2f4;
+                     width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
+                     justify-content:center;font-weight:700;font-size:14px;
+                     box-shadow:0 3px 10px rgba(0,0,0,0.5);">${count}</div>`,
+        iconSize: [42, 42],
+      });
+    },
+  }).addTo(leafletMap);
+
   renderLeafletMapMarkers();
+}
+
+function machineMarkerIcon(m) {
+  const color = m.status === "operando" ? "#22c55e" : "#eab308";
+  if (m.photoUrl) {
+    return L.divIcon({
+      className: "",
+      html: `<div style="width:38px;height:38px;border-radius:50%;border:3px solid ${color};
+                   overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.5);background:#16161b;">
+               <img src="${m.photoUrl}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+             </div>`,
+      iconSize: [38, 38],
+      iconAnchor: [19, 19],
+      popupAnchor: [0, -19],
+    });
+  }
+  return L.divIcon({
+    className: "",
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};
+                 border:2px solid #0b0b0e;display:flex;align-items:center;justify-content:center;
+                 color:#0b0b0e;font-size:10px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.5);">
+             ${m.photoInitials || ""}
+           </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -15],
+  });
 }
 
 function renderLeafletMapMarkers() {
@@ -241,18 +307,14 @@ function renderLeafletMapMarkers() {
 
   list.forEach((m) => {
     const color = m.status === "operando" ? "#22c55e" : "#eab308";
-    const icon = L.divIcon({
-      className: "",
-      html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #0b0b0e;box-shadow:0 0 0 2px ${color}55;"></div>`,
-      iconSize: [16, 16],
-    });
-    const marker = L.marker([m.lat, m.lng], { icon }).addTo(markerLayer);
+    const marker = L.marker([m.lat, m.lng], { icon: machineMarkerIcon(m) });
     marker.bindPopup(`
       <div class="popup-title">${m.name}</div>
       <div class="popup-type">${m.type}</div>
       <div class="popup-status" style="color:${color}">${STATUS_LABEL[m.status]}</div>
     `);
     marker.on("click", () => openModal(m));
+    markerLayer.addLayer(marker);
     bounds.push([m.lat, m.lng]);
   });
 
@@ -282,6 +344,7 @@ function openModal(machine) {
 
     <div class="modal-field"><span class="label">Status</span><span class="value">${STATUS_LABEL[machine.status]}</span></div>
     <div class="modal-field"><span class="label">Horímetro</span><span class="value">${(machine.horimetro || 0).toLocaleString("pt-BR")} h</span></div>
+    <div class="modal-field"><span class="label">Peso</span><span class="value">${(machine.pesoTon || 0).toLocaleString("pt-BR")} ton</span></div>
     <div class="modal-field"><span class="label">Localização</span><span class="value">${machine.address}</span></div>
     <div class="modal-field"><span class="label">Última atualização</span><span class="value">${timeAgo(machine.lastUpdate)}</span></div>
 
@@ -363,7 +426,7 @@ document.getElementById("navMachines").addEventListener("click", () => {
   document.getElementById("listView").style.display = "flex";
   document.getElementById("mapView").style.display = "none";
   document.querySelector(".search-wrap").style.display = "block";
-  document.querySelector(".chips").style.display = "flex";
+  document.querySelector(".chips-row").style.display = "flex";
 });
 
 document.getElementById("navMap").addEventListener("click", () => {
@@ -373,7 +436,7 @@ document.getElementById("navMap").addEventListener("click", () => {
   document.getElementById("listView").style.display = "none";
   document.getElementById("mapView").style.display = "block";
   document.querySelector(".search-wrap").style.display = "none";
-  document.querySelector(".chips").style.display = "flex";
+  document.querySelector(".chips-row").style.display = "flex";
 
   const alreadyInitialized = USING_GOOGLE_MAPS ? googleMap : leafletMap;
   if (!alreadyInitialized) {
@@ -390,6 +453,79 @@ document.getElementById("searchInput").addEventListener("input", (e) => {
   state.search = e.target.value;
   renderList();
 });
+
+document.getElementById("filterBtn").addEventListener("click", openFilterPanel);
+
+function openFilterPanel() {
+  const overlay = document.getElementById("modalOverlay");
+  const modal = document.getElementById("modal");
+
+  const sortOptions = [
+    { value: "none", label: "Padrão" },
+    { value: "horimetro_desc", label: "Horímetro (maior primeiro)" },
+    { value: "horimetro_asc", label: "Horímetro (menor primeiro)" },
+  ];
+
+  modal.innerHTML = `
+    <button class="modal-close" id="modalClose">&times;</button>
+    <h2>Filtrar máquinas</h2>
+    <div class="modal-sub">Selecione um ou mais tipos e a ordenação</div>
+
+    <div class="filter-section-title">Ordenar por</div>
+    <div class="sort-options" id="sortOptions">
+      ${sortOptions
+        .map(
+          (o) => `
+        <label class="sort-option ${state.sortBy === o.value ? "selected" : ""}">
+          <input type="radio" name="sortBy" value="${o.value}" ${state.sortBy === o.value ? "checked" : ""} />
+          ${o.label}
+        </label>`
+        )
+        .join("")}
+    </div>
+
+    <div class="filter-section-title">Tipo de máquina</div>
+    <div class="type-checkbox-list" id="typeCheckboxList">
+      ${MACHINE_TYPES.map(
+        (t) => `
+        <label class="type-checkbox">
+          <input type="checkbox" value="${t}" ${state.selectedTypes.includes(t) ? "checked" : ""} />
+          ${t}
+        </label>`
+      ).join("")}
+    </div>
+
+    <button class="btn-primary" id="applyFilterBtn">Aplicar filtros</button>
+    <button class="btn-secondary" id="clearFilterBtn">Limpar filtros</button>
+  `;
+
+  overlay.classList.add("open");
+  document.getElementById("modalClose").onclick = closeModal;
+
+  document.getElementById("applyFilterBtn").onclick = () => {
+    const checkedTypes = Array.from(
+      modal.querySelectorAll('#typeCheckboxList input[type="checkbox"]:checked')
+    ).map((cb) => cb.value);
+    const sortValue = modal.querySelector('input[name="sortBy"]:checked').value;
+
+    state.selectedTypes = checkedTypes;
+    state.sortBy = sortValue;
+
+    closeModal();
+    renderChips();
+    renderList();
+    if (state.view === "map") renderMapMarkers();
+  };
+
+  document.getElementById("clearFilterBtn").onclick = () => {
+    state.selectedTypes = [];
+    state.sortBy = "none";
+    closeModal();
+    renderChips();
+    renderList();
+    if (state.view === "map") renderMapMarkers();
+  };
+}
 
 document.getElementById("modalOverlay").addEventListener("click", (e) => {
   if (e.target.id === "modalOverlay") closeModal();
@@ -418,6 +554,8 @@ function openAddMachineForm() {
       <input class="form-input" id="fLat" placeholder="Latitude (ex: -23.5613)" />
       <input class="form-input" id="fLng" placeholder="Longitude (ex: -46.6565)" />
       <input class="form-input" id="fHorimetro" type="number" step="0.1" placeholder="Horímetro (horas)" />
+      <input class="form-input" id="fDataHorimetro" type="date" placeholder="Data do horímetro" />
+      <input class="form-input" id="fPesoTon" type="number" step="0.1" placeholder="Peso (toneladas)" />
       <input type="file" accept="image/*" id="fPhoto" />
     </div>
 
@@ -440,6 +578,8 @@ async function saveNewMachine() {
   const lat = parseFloat(document.getElementById("fLat").value) || -23.5613;
   const lng = parseFloat(document.getElementById("fLng").value) || -46.6565;
   const horimetro = parseFloat(document.getElementById("fHorimetro").value) || 0;
+  const dataHorimetro = document.getElementById("fDataHorimetro").value || "";
+  const pesoTon = parseFloat(document.getElementById("fPesoTon").value) || 0;
   const photoFile = document.getElementById("fPhoto").files[0];
   const statusEl = document.getElementById("saveStatus");
 
@@ -455,7 +595,7 @@ async function saveNewMachine() {
 
   statusEl.textContent = "Salvando na planilha...";
   try {
-    const payload = { name, tag, type, address, lat, lng, horimetro };
+    const payload = { name, tag, type, address, lat, lng, horimetro, dataHorimetro, pesoTon };
     if (photoFile) {
       payload.photoBase64 = await fileToBase64(photoFile);
       payload.photoMimeType = photoFile.type;
@@ -499,6 +639,8 @@ function openEditMachineForm(machine) {
       <input class="form-input" id="fLat" placeholder="Latitude" value="${machine.lat}" />
       <input class="form-input" id="fLng" placeholder="Longitude" value="${machine.lng}" />
       <input class="form-input" id="fHorimetro" type="number" step="0.1" placeholder="Horímetro (horas)" value="${machine.horimetro || 0}" />
+      <input class="form-input" id="fDataHorimetro" type="date" value="${machine.dataHorimetro || ""}" />
+      <input class="form-input" id="fPesoTon" type="number" step="0.1" placeholder="Peso (toneladas)" value="${machine.pesoTon || 0}" />
       <div style="font-size:12.5px;color:var(--text-faint);">Trocar foto (opcional):</div>
       <input type="file" accept="image/*" id="fPhoto" />
     </div>
@@ -523,6 +665,8 @@ async function saveEditedMachine(id) {
   const lat = document.getElementById("fLat").value.trim();
   const lng = document.getElementById("fLng").value.trim();
   const horimetro = document.getElementById("fHorimetro").value.trim();
+  const dataHorimetro = document.getElementById("fDataHorimetro").value || "";
+  const pesoTon = document.getElementById("fPesoTon").value.trim();
   const photoFile = document.getElementById("fPhoto").files[0];
   const statusEl = document.getElementById("saveStatus");
 
@@ -538,7 +682,7 @@ async function saveEditedMachine(id) {
 
   statusEl.textContent = "Salvando alterações...";
   try {
-    const payload = { id, name, tag, type, status, address, lat, lng, horimetro };
+    const payload = { id, name, tag, type, status, address, lat, lng, horimetro, dataHorimetro, pesoTon };
     if (photoFile) {
       payload.photoBase64 = await fileToBase64(photoFile);
       payload.photoMimeType = photoFile.type;

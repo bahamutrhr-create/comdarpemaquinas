@@ -11,16 +11,26 @@ const MACHINE_TYPES = [
   "Pá Carregadeira",
   "Mini Carregadeira",
   "Trator de Esteira",
+  "Trator Agrícola",
   "Motoniveladora",
   "Acabadora",
   "Fresadora",
+  "Rolo Compactador",
   "Rolo Compactador Pé de Carneiro",
   "Rolo Compactador Chapa",
   "Rolo Compactador Pneu",
+  "Máquina Extrusora",
   "Guindaste",
+  "Manipulador Telescópico",
+  "Plataforma Elevatória",
+  "Empilhadeira",
   "Caminhão Comboio",
   "Caminhão Basculante",
   "Caminhão Fora de Estrada",
+  "Caminhão Pipa",
+  "Caminhão Carroceria",
+  "Veículo Leve",
+  "Ônibus",
 ];
 
 const MOCK_MACHINES = [
@@ -37,6 +47,8 @@ const MOCK_MACHINES = [
     photoInitials: "CAT",
     photoColor: "#d4a35a",
     horimetro: 1240,
+    pesoTon: 11.5,
+    dataHorimetro: "2026-07-02",
   },
   {
     id: "MAQ-002",
@@ -51,6 +63,8 @@ const MOCK_MACHINES = [
     photoInitials: "KOM",
     photoColor: "#3a6ea5",
     horimetro: 3180,
+    pesoTon: 11.8,
+    dataHorimetro: "2026-07-02",
   },
   {
     id: "MAQ-003",
@@ -65,6 +79,8 @@ const MOCK_MACHINES = [
     photoInitials: "JCB",
     photoColor: "#c23b3b",
     horimetro: 860,
+    pesoTon: 4.26,
+    dataHorimetro: "2026-07-02",
   },
   {
     id: "MAQ-004",
@@ -79,6 +95,8 @@ const MOCK_MACHINES = [
     photoInitials: "LIE",
     photoColor: "#e0a300",
     horimetro: 2510,
+    pesoTon: 14.9,
+    dataHorimetro: "2026-07-02",
   },
   {
     id: "MAQ-005",
@@ -93,6 +111,8 @@ const MOCK_MACHINES = [
     photoInitials: "CAT",
     photoColor: "#d4a35a",
     horimetro: 430,
+    pesoTon: 3.0,
+    dataHorimetro: "2026-07-02",
   },
   {
     id: "MAQ-006",
@@ -107,5 +127,7 @@ const MOCK_MACHINES = [
     photoInitials: "CAT",
     photoColor: "#d4a35a",
     horimetro: 1990,
+    pesoTon: 14.0,
+    dataHorimetro: "2026-07-02",
   },
 ];
