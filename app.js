@@ -1,850 +1,569 @@
-// app.js
+/**
+ * BACKEND DO APP DE MÁQUINAS
+ * ---------------------------------------------------------
+ * Como instalar:
+ * 1. Crie uma Planilha Google nova.
+ * 2. Renomeie a primeira aba para exatamente:  Maquinas
+ * 3. Na linha 1, cole estes cabeçalhos (uma coluna cada, na ordem):
+ *    id | tag | name | type | status | address | lat | lng | lastUpdate | photoUrl | photoInitials | photoColor | horimetro | pesoTon | dataHorimetro
+ *    (se sua planilha já existia antes, só adicione as colunas novas na sequência, no fim)
+ * 3b. Uma aba extra chamada "Sessions" é criada automaticamente pelo próprio script
+ *     na primeira vez que alguém pedir um código de login — não precisa criar na mão.
+ * 4. Menu Extensões > Apps Script.
+ * 5. Apague o conteúdo padrão de Code.gs e cole este arquivo inteiro.
+ * 6. Clique em "Implantar" > "Nova implantação" > tipo "App da Web".
+ *    - Executar como: Eu (seu usuário)
+ *    - Quem pode acessar: Qualquer pessoa
+ * 7. Copie a URL gerada (termina em /exec) e cole em config.js no front-end.
+ * ---------------------------------------------------------
+ */
 
-const STATUS_LABEL = {
-  operando: "OPERANDO",
-  nao_operando: "NÃO OPERANDO",
-};
+const SHEET_NAME = "Maquinas";
+const SESSIONS_SHEET_NAME = "Sessions";
+const MAINTENANCE_SHEET_NAME = "Manutencoes";
+const PHOTOS_FOLDER_NAME = "Fotos Maquinas App";
+const PALETTE = ["#d4a35a", "#3a6ea5", "#c23b3b", "#e0a300", "#5aa06c", "#8a5ac2"];
+const ALLOWED_EMAIL_DOMAIN = "comdarpe.com";
+const CODE_VALID_MINUTES = 10;
+const SESSION_VALID_HOURS = 24;
 
-let state = {
-  view: "list",     // "list" | "map"
-  selectedTypes: [], // vazio = todos os tipos
-  selectedAddresses: [], // vazio = todas as obras
-  selectedStatuses: [], // vazio = todos os status
-  sortBy: "none",    // "none" | "horimetro_desc" | "horimetro_asc"
-  search: "",
-};
+// E-mails que recebem aviso de novo ticket de manutenção. Adicione mais
+// endereços aqui separados por vírgula conforme precisar.
+const MAINTENANCE_CONTACTS = ["engenharia15@comdarpe.com.br"];
 
-let MACHINES = [];
-let leafletMap = null;
-let markerLayer = null;
+// ---------- entrypoints ----------
 
-// ---------- helpers ----------
+function doGet(e) {
+  const action = (e.parameter.action || "list").toLowerCase();
 
-function timeAgo(dateStr) {
-  const then = new Date(dateStr);
-  const now = new Date();
-  const months =
-    (now.getFullYear() - then.getFullYear()) * 12 +
-    (now.getMonth() - then.getMonth());
-  if (months <= 0) return "hoje";
-  if (months === 1) return "há 1 mês";
-  return `há ${months} meses`;
-}
-
-function filteredMachines() {
-  let list = MACHINES.filter((m) => {
-    const matchesType =
-      state.selectedTypes.length === 0 || state.selectedTypes.includes(m.type);
-    const matchesAddress =
-      state.selectedAddresses.length === 0 || state.selectedAddresses.includes(m.address);
-    const matchesStatus =
-      state.selectedStatuses.length === 0 || state.selectedStatuses.includes(m.status);
-    const q = state.search.trim().toLowerCase();
-    const matchesSearch =
-      !q ||
-      m.name.toLowerCase().includes(q) ||
-      m.tag.toLowerCase().includes(q) ||
-      m.type.toLowerCase().includes(q) ||
-      m.address.toLowerCase().includes(q);
-    return matchesType && matchesAddress && matchesStatus && matchesSearch;
-  });
-
-  if (state.sortBy === "horimetro_desc") {
-    list = list.slice().sort((a, b) => (b.horimetro || 0) - (a.horimetro || 0));
-  } else if (state.sortBy === "horimetro_asc") {
-    list = list.slice().sort((a, b) => (a.horimetro || 0) - (b.horimetro || 0));
+  // rotas de autenticação (não exigem sessão)
+  if (action === "request-code") {
+    return requestCodeResponse_(e.parameter.email, e.parameter.callback);
+  }
+  if (action === "verify-code") {
+    return verifyCodeResponse_(e.parameter.email, e.parameter.code, e.parameter.callback);
+  }
+  if (action === "check-session") {
+    return checkSessionResponse_(e.parameter.token, e.parameter.callback);
+  }
+  // check-in por QR fica fora da trava de login, de propósito (uso rápido no campo)
+  if (action === "checkin") {
+    return checkinPage_(e.parameter.id);
+  }
+  if (action === "update-location") {
+    return updateLocationAndRespond_(e.parameter);
+  }
+  // tickets de manutenção também ficam fora da trava por enquanto (login em pausa)
+  if (action === "list-tickets") {
+    return listTicketsResponse_(e.parameter.machineId, e.parameter.callback);
   }
 
-  return list;
-}
-
-// ---------- chips ----------
-
-function renderChips() {
-  const row = document.getElementById("chipRow");
-  const isAll =
-    state.selectedTypes.length === 0 &&
-    state.selectedAddresses.length === 0 &&
-    state.selectedStatuses.length === 0;
-  row.innerHTML = `<button class="chip ${isAll ? "active" : ""}" id="chipTodas">Todas</button>`;
-
-  document.getElementById("chipTodas").addEventListener("click", () => {
-    state.selectedTypes = [];
-    state.selectedAddresses = [];
-    state.selectedStatuses = [];
-    state.sortBy = "none";
-    renderChips();
-    renderFilterButton();
-    renderList();
-    if (state.view === "map") renderMapMarkers();
-  });
-
-  renderFilterButton();
-}
-
-function renderFilterButton() {
-  const btn = document.getElementById("filterBtn");
-  const badge = document.getElementById("filterBadge");
-  const activeCount =
-    state.selectedTypes.length +
-    state.selectedAddresses.length +
-    state.selectedStatuses.length +
-    (state.sortBy !== "none" ? 1 : 0);
-
-  if (activeCount > 0) {
-    btn.classList.add("has-filters");
-    badge.style.display = "flex";
-    badge.textContent = activeCount;
-  } else {
-    btn.classList.remove("has-filters");
-    badge.style.display = "none";
+  // tudo abaixo exige sessão válida
+  if (!isValidSession_(e.parameter.token)) {
+    return authErrorResponse_(e.parameter.callback);
   }
+  if (action === "list") {
+    return listResponse_(e.parameter.callback);
+  }
+  return jsonResponse_({ error: "ação desconhecida" });
 }
 
-// ---------- list view ----------
-
-function renderList() {
-  const list = filteredMachines();
-  const container = document.getElementById("listView");
-  document.getElementById("machineCount").textContent = `${MACHINES.length} máquinas rastreadas`;
-
-  if (list.length === 0) {
-    container.innerHTML = `<div class="empty-state">Nenhuma máquina encontrada.</div>`;
-    return;
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse_({ error: "corpo inválido" });
   }
 
-  container.innerHTML = list
-    .map((m) => {
-      const initials = m.photoInitials;
-      const photo = m.photoUrl
-        ? `<img src="${m.photoUrl}" alt="${m.name}" class="machine-photo" style="object-fit:cover;border-color:${m.photoColor}"/>`
-        : `<div class="machine-photo" style="background:${m.photoColor}">${initials}</div>`;
-      return `
-      <div class="machine-card" data-id="${m.id}">
-        ${photo}
-        <div class="machine-info">
-          <div class="machine-title-row">
-            <span class="machine-name">${m.name}</span>
-            <span class="status-pill ${m.status}"><span class="dot"></span>${STATUS_LABEL[m.status]}</span>
-          </div>
-          <div class="machine-type">${m.type}</div>
-          <div class="machine-meta">
-            <div class="meta-row">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-              ${m.address}
-            </div>
-            <div class="meta-row">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-              TAG ${m.tag}
-            </div>
-            <div class="meta-row">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"></path><path d="M12 12V8"></path></svg>
-              Horímetro: ${(m.horimetro || 0).toLocaleString("pt-BR")} h
-            </div>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join("");
-
-  container.querySelectorAll(".machine-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      const machine = MACHINES.find((m) => m.id === card.dataset.id);
-      openModal(machine);
-    });
-  });
-}
-
-// ---------- map view ----------
-
-let googleMap = null;
-let googleMarkers = [];
-let googleMapsLoadingPromise = null;
-
-function initMap() {
-  if (USING_GOOGLE_MAPS) {
-    loadGoogleMapsScript()
-      .then(initGoogleMap)
-      .catch(() => {
-        document.getElementById("map").innerHTML =
-          `<div class="empty-state">Não foi possível carregar o Google Maps.<br/>Verifique a chave em config.js.</div>`;
-      });
-  } else {
-    initLeafletMap();
+  // tickets de manutenção ficam fora da trava por enquanto (login em pausa)
+  if (body.action === "create-ticket") {
+    return jsonResponse_(createTicket_(body));
   }
-}
 
-function renderMapMarkers() {
-  if (USING_GOOGLE_MAPS && googleMap) {
-    renderGoogleMapMarkers();
-  } else if (leafletMap) {
-    renderLeafletMapMarkers();
+  if (!isValidSession_(body.token)) {
+    return jsonResponse_({ error: "sessão inválida ou expirada, faça login novamente" });
   }
+
+  if (body.action === "create") {
+    return jsonResponse_(createMachine_(body));
+  }
+  if (body.action === "update") {
+    return jsonResponse_(updateMachine_(body));
+  }
+  if (body.action === "update-status") {
+    return jsonResponse_(updateStatus_(body));
+  }
+  return jsonResponse_({ error: "ação desconhecida" });
 }
 
-// --- Google Maps ---
+// ---------- tickets de manutenção ----------
 
-function loadGoogleMapsScript() {
-  if (window.google && window.google.maps) return Promise.resolve();
-  if (googleMapsLoadingPromise) return googleMapsLoadingPromise;
-
-  googleMapsLoadingPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${CONFIG.GOOGLE_MAPS_API_KEY}`;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Falha ao carregar Google Maps"));
-    document.head.appendChild(script);
-  });
-  return googleMapsLoadingPromise;
-}
-
-function initGoogleMap() {
-  googleMap = new google.maps.Map(document.getElementById("map"), {
-    center: { lat: -23.5613, lng: -46.6565 },
-    zoom: 12,
-    styles: GOOGLE_MAP_DARK_STYLE,
-    disableDefaultUI: false,
-    fullscreenControl: false,
-  });
-  renderGoogleMapMarkers();
-}
-
-function renderGoogleMapMarkers() {
-  googleMarkers.forEach((mk) => mk.setMap(null));
-  googleMarkers = [];
-
-  const list = filteredMachines();
-  const bounds = new google.maps.LatLngBounds();
-
-  list.forEach((m) => {
-    const color = m.status === "operando" ? "#22c55e" : "#eab308";
-    const marker = new google.maps.Marker({
-      position: { lat: m.lat, lng: m.lng },
-      map: googleMap,
-      title: m.name,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        fillColor: color,
-        fillOpacity: 1,
-        strokeColor: "#0b0b0e",
-        strokeWeight: 2,
-        scale: 9,
-      },
-    });
-    const info = new google.maps.InfoWindow({
-      content: `<div style="font-family:sans-serif;">
-        <strong>${m.name}</strong><br/>
-        <span style="color:#6ea8e8;">${m.type}</span><br/>
-        <span style="color:${color};font-weight:bold;">${STATUS_LABEL[m.status]}</span><br/>
-        <span>TAG ${m.tag}</span><br/>
-        <button onclick="openMachineDetailById('${m.id}')" style="margin-top:6px;background:#f97316;color:#1a0f00;border:none;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer;">Ver detalhes completos</button>
-      </div>`,
-    });
-    marker.addListener("click", () => {
-      info.open(googleMap, marker);
-    });
-    googleMarkers.push(marker);
-    bounds.extend(marker.getPosition());
-  });
-
-  if (list.length) googleMap.fitBounds(bounds, 60);
-}
-
-const GOOGLE_MAP_DARK_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#16161b" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#0b0b0e" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#9a9aa5" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#26262e" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0d1b2a" }] },
-  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#1a1a20" }] },
+const TICKET_HEADERS = [
+  "id", "machineId", "machineName", "machineTag", "horimetro",
+  "tipo", "descricao", "fotos", "status", "dataAbertura", "responsavel",
 ];
 
-// --- Leaflet (OpenStreetMap, padrão gratuito) ---
-
-function initLeafletMap() {
-  leafletMap = L.map("map", { zoomControl: true }).setView([-23.5613, -46.6565], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap",
-    maxZoom: 19,
-  }).addTo(leafletMap);
-
-  markerLayer = L.markerClusterGroup({
-    showCoverageOnHover: false,
-    spiderfyOnMaxZoom: true,
-    maxClusterRadius: 55,
-    iconCreateFunction: (cluster) => {
-      const count = cluster.getChildCount();
-      return L.divIcon({
-        className: "",
-        html: `<div style="background:#16161b;border:2.5px solid #f97316;color:#f2f2f4;
-                     width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
-                     justify-content:center;font-weight:700;font-size:14px;
-                     box-shadow:0 3px 10px rgba(0,0,0,0.5);">${count}</div>`,
-        iconSize: [42, 42],
-      });
-    },
-  }).addTo(leafletMap);
-
-  renderLeafletMapMarkers();
+function getMaintenanceSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(MAINTENANCE_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(MAINTENANCE_SHEET_NAME);
+    sheet.appendRow(TICKET_HEADERS);
+  }
+  return sheet;
 }
 
-function machineMarkerIcon(m) {
-  const color = m.status === "operando" ? "#22c55e" : "#eab308";
-  if (m.photoUrl) {
-    return L.divIcon({
-      className: "",
-      html: `<div style="width:38px;height:38px;border-radius:50%;border:3px solid ${color};
-                   overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.5);background:#16161b;">
-               <img src="${m.photoUrl}" style="width:100%;height:100%;object-fit:cover;display:block;" />
-             </div>`,
-      iconSize: [38, 38],
-      iconAnchor: [19, 19],
-      popupAnchor: [0, -19],
+function nextTicketId_(sheet) {
+  const lastRow = sheet.getLastRow();
+  return "TCK-" + String(lastRow).padStart(4, "0");
+}
+
+function rowToTicket_(r) {
+  const obj = {};
+  TICKET_HEADERS.forEach((h, i) => (obj[h] = r[i]));
+  obj.horimetro = Number(obj.horimetro) || 0;
+  obj.fotos = obj.fotos ? String(obj.fotos).split(",").filter(Boolean) : [];
+  if (obj.dataAbertura instanceof Date) {
+    obj.dataAbertura = Utilities.formatDate(obj.dataAbertura, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+  }
+  return obj;
+}
+
+function createTicket_(body) {
+  const sheet = getMaintenanceSheet_();
+  const id = nextTicketId_(sheet);
+
+  const photoUrls = [];
+  if (body.photos && body.photos.length) {
+    body.photos.forEach((p, i) => {
+      try {
+        const url = uploadPhoto_(p.base64, p.mimeType || "image/jpeg", id + "-" + (i + 1) + ".jpg");
+        photoUrls.push(url);
+      } catch (err) {
+        // se uma foto falhar, continua salvando o ticket com as demais
+      }
     });
   }
-  return L.divIcon({
-    className: "",
-    html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};
-                 border:2px solid #0b0b0e;display:flex;align-items:center;justify-content:center;
-                 color:#0b0b0e;font-size:10px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.5);">
-             ${m.photoInitials || ""}
-           </div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    popupAnchor: [0, -15],
-  });
-}
 
-window.openMachineDetailById = (id) => {
-  const m = MACHINES.find((x) => x.id === id);
-  if (m) openModal(m);
-};
-
-function renderLeafletMapMarkers() {
-  markerLayer.clearLayers();
-  const list = filteredMachines();
-  const bounds = [];
-
-  list.forEach((m) => {
-    const color = m.status === "operando" ? "#22c55e" : "#eab308";
-    const marker = L.marker([m.lat, m.lng], { icon: machineMarkerIcon(m) });
-    marker.bindPopup(`
-      <div class="popup-title">${m.name}</div>
-      <div class="popup-type">${m.type}</div>
-      <div class="popup-status" style="color:${color}">${STATUS_LABEL[m.status]}</div>
-      <div class="popup-tag">TAG ${m.tag}</div>
-      <button class="popup-details-btn" onclick="openMachineDetailById('${m.id}')">Ver detalhes completos</button>
-    `);
-    markerLayer.addLayer(marker);
-    bounds.push([m.lat, m.lng]);
-  });
-
-  if (bounds.length) {
-    leafletMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-  }
-}
-
-// ---------- modal (detail + QR + check-in) ----------
-
-function openModal(machine) {
-  const overlay = document.getElementById("modalOverlay");
-  const modal = document.getElementById("modal");
-  const checkinUrl = USING_REAL_BACKEND
-    ? checkinUrlFor(machine.id)
-    : `${window.location.origin}${window.location.pathname}?checkin=${machine.id}`;
-
-  const photoHtml = machine.photoUrl
-    ? `<img src="${machine.photoUrl}" alt="${machine.name}" class="modal-photo" style="object-fit:cover;border-color:${machine.photoColor}"/>`
-    : `<div class="modal-photo" style="background:${machine.photoColor}">${machine.photoInitials}</div>`;
-
-  modal.innerHTML = `
-    <button class="modal-close" id="modalClose">&times;</button>
-    ${photoHtml}
-    <h2>${machine.name}</h2>
-    <div class="modal-sub">${machine.type} · TAG ${machine.tag}</div>
-
-    <div class="modal-field"><span class="label">Status</span><span class="value">${STATUS_LABEL[machine.status]}</span></div>
-    <div class="modal-field"><span class="label">Horímetro</span><span class="value">${(machine.horimetro || 0).toLocaleString("pt-BR")} h</span></div>
-    <div class="modal-field"><span class="label">Peso</span><span class="value">${(machine.pesoTon || 0).toLocaleString("pt-BR")} ton</span></div>
-    <div class="modal-field"><span class="label">Localização</span><span class="value">${machine.address}</span></div>
-    <div class="modal-field"><span class="label">Última atualização</span><span class="value">${timeAgo(machine.lastUpdate)}</span></div>
-
-    <div class="qr-box"><div id="qrcode"></div></div>
-    <div style="text-align:center;color:var(--text-faint);font-size:12px;margin-top:-8px;margin-bottom:4px;">
-      Escaneie para fazer check-in desta máquina
-    </div>
-
-    ${
-      USING_REAL_BACKEND
-        ? `<a class="btn-primary" style="display:block;text-align:center;text-decoration:none;" href="${checkinUrl}" target="_blank">Abrir página de check-in</a>`
-        : `<button class="btn-primary" id="checkinBtn">Simular check-in (conecte o Sheets pra valer)</button>`
-    }
-    <button class="btn-secondary" id="editBtn">Editar máquina</button>
-    <button class="btn-secondary" id="closeBtn2">Fechar</button>
-  `;
-
-  new QRCode(document.getElementById("qrcode"), {
-    text: checkinUrl,
-    width: 140,
-    height: 140,
-    colorDark: "#0b0b0e",
-    colorLight: "#ffffff",
-  });
-
-  overlay.classList.add("open");
-
-  document.getElementById("modalClose").onclick = closeModal;
-  document.getElementById("closeBtn2").onclick = closeModal;
-  document.getElementById("editBtn").onclick = () => openEditMachineForm(machine);
-  if (!USING_REAL_BACKEND) {
-    document.getElementById("checkinBtn").onclick = () => runCheckin(machine);
-  }
-}
-
-function closeModal() {
-  document.getElementById("modalOverlay").classList.remove("open");
-}
-
-function runCheckin(machine) {
-  const modal = document.getElementById("modal");
-
-  const finish = (lat, lng, addressLabel) => {
-    machine.lat = lat;
-    machine.lng = lng;
-    machine.address = addressLabel;
-    machine.lastUpdate = new Date().toISOString().slice(0, 10);
-    machine.status = "operando";
-
-    modal.innerHTML = `
-      <button class="modal-close" id="modalClose">&times;</button>
-      <div class="checkin-msg">
-        <svg class="icon-ok" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="8 12 11 15 16 9"></polyline></svg>
-        <h2>Check-in realizado</h2>
-        <p class="modal-sub">${machine.name} teve a localização atualizada.</p>
-      </div>
-      <button class="btn-primary" id="doneBtn">Concluir</button>
-    `;
-    document.getElementById("modalClose").onclick = () => { closeModal(); renderList(); if (state.view === "map") renderMapMarkers(); };
-    document.getElementById("doneBtn").onclick = () => { closeModal(); renderList(); if (state.view === "map") renderMapMarkers(); };
-  };
-
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => finish(pos.coords.latitude, pos.coords.longitude, "Localização atual do dispositivo"),
-      () => finish(machine.lat, machine.lng, machine.address) // permissão negada: mantém local
-    );
-  } else {
-    finish(machine.lat, machine.lng, machine.address);
-  }
-}
-
-// ---------- nav + search ----------
-
-function goToListView() {
-  state.view = "list";
-  document.getElementById("navMachines").classList.add("active");
-  document.getElementById("navMap").classList.remove("active");
-  document.getElementById("listView").style.display = "flex";
-  document.getElementById("mapView").style.display = "none";
-  document.querySelector(".search-wrap").style.display = "block";
-  document.querySelector(".chips-row").style.display = "flex";
-}
-
-document.getElementById("navMachines").addEventListener("click", goToListView);
-document.getElementById("mapCloseBtn").addEventListener("click", goToListView);
-
-document.getElementById("navMap").addEventListener("click", () => {
-  state.view = "map";
-  document.getElementById("navMap").classList.add("active");
-  document.getElementById("navMachines").classList.remove("active");
-  document.getElementById("listView").style.display = "none";
-  document.getElementById("mapView").style.display = "block";
-  document.querySelector(".search-wrap").style.display = "none";
-  document.querySelector(".chips-row").style.display = "flex";
-
-  const alreadyInitialized = USING_GOOGLE_MAPS ? googleMap : leafletMap;
-  if (!alreadyInitialized) {
-    setTimeout(initMap, 0); // garante que o container já tem altura
-  } else if (!USING_GOOGLE_MAPS) {
-    setTimeout(() => leafletMap.invalidateSize(), 0);
-    renderMapMarkers();
-  } else {
-    renderMapMarkers();
-  }
-});
-
-document.getElementById("searchInput").addEventListener("input", (e) => {
-  state.search = e.target.value;
-  renderList();
-});
-
-document.getElementById("filterBtn").addEventListener("click", openFilterPanel);
-
-function openFilterPanel() {
-  const overlay = document.getElementById("modalOverlay");
-  const modal = document.getElementById("modal");
-
-  const sortOptions = [
-    { value: "none", label: "Padrão" },
-    { value: "horimetro_desc", label: "Horímetro (maior primeiro)" },
-    { value: "horimetro_asc", label: "Horímetro (menor primeiro)" },
+  const row = [
+    id,
+    body.machineId || "",
+    body.machineName || "",
+    body.machineTag || "",
+    body.horimetro || 0,
+    body.tipo || "Corretiva",
+    body.descricao || "",
+    photoUrls.join(","),
+    "Aberto",
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss"),
+    body.responsavel || "",
   ];
 
-  const uniqueAddresses = Array.from(new Set(MACHINES.map((m) => m.address))).sort();
+  sheet.appendRow(row);
+  const ticket = rowToTicket_(row);
+  sendTicketEmail_(ticket);
 
-  modal.innerHTML = `
-    <button class="modal-close" id="modalClose">&times;</button>
-    <h2>Filtrar máquinas</h2>
-    <div class="modal-sub">Selecione um ou mais critérios</div>
-
-    <div class="filter-section-title">Ordenar por</div>
-    <div class="sort-options" id="sortOptions">
-      ${sortOptions
-        .map(
-          (o) => `
-        <label class="sort-option ${state.sortBy === o.value ? "selected" : ""}">
-          <input type="radio" name="sortBy" value="${o.value}" ${state.sortBy === o.value ? "checked" : ""} />
-          ${o.label}
-        </label>`
-        )
-        .join("")}
-    </div>
-
-    <div class="filter-section-title">Status</div>
-    <div class="type-checkbox-list" id="statusCheckboxList">
-      <label class="type-checkbox">
-        <input type="checkbox" value="operando" ${state.selectedStatuses.includes("operando") ? "checked" : ""} />
-        Operando
-      </label>
-      <label class="type-checkbox">
-        <input type="checkbox" value="nao_operando" ${state.selectedStatuses.includes("nao_operando") ? "checked" : ""} />
-        Não operando
-      </label>
-    </div>
-
-    <div class="filter-section-title">Obra</div>
-    <div class="type-checkbox-list" id="addressCheckboxList">
-      ${uniqueAddresses
-        .map(
-          (a) => `
-        <label class="type-checkbox">
-          <input type="checkbox" value="${a}" ${state.selectedAddresses.includes(a) ? "checked" : ""} />
-          ${a}
-        </label>`
-        )
-        .join("")}
-    </div>
-
-    <div class="filter-section-title">Tipo de máquina</div>
-    <div class="type-checkbox-list" id="typeCheckboxList">
-      ${MACHINE_TYPES.map(
-        (t) => `
-        <label class="type-checkbox">
-          <input type="checkbox" value="${t}" ${state.selectedTypes.includes(t) ? "checked" : ""} />
-          ${t}
-        </label>`
-      ).join("")}
-    </div>
-
-    <button class="btn-primary" id="applyFilterBtn">Aplicar filtros</button>
-    <button class="btn-secondary" id="clearFilterBtn">Limpar filtros</button>
-  `;
-
-  overlay.classList.add("open");
-  document.getElementById("modalClose").onclick = closeModal;
-
-  document.getElementById("applyFilterBtn").onclick = () => {
-    const checkedTypes = Array.from(
-      modal.querySelectorAll('#typeCheckboxList input[type="checkbox"]:checked')
-    ).map((cb) => cb.value);
-    const checkedAddresses = Array.from(
-      modal.querySelectorAll('#addressCheckboxList input[type="checkbox"]:checked')
-    ).map((cb) => cb.value);
-    const checkedStatuses = Array.from(
-      modal.querySelectorAll('#statusCheckboxList input[type="checkbox"]:checked')
-    ).map((cb) => cb.value);
-    const sortValue = modal.querySelector('input[name="sortBy"]:checked').value;
-
-    state.selectedTypes = checkedTypes;
-    state.selectedAddresses = checkedAddresses;
-    state.selectedStatuses = checkedStatuses;
-    state.sortBy = sortValue;
-
-    closeModal();
-    renderChips();
-    renderList();
-    if (state.view === "map") renderMapMarkers();
-  };
-
-  document.getElementById("clearFilterBtn").onclick = () => {
-    state.selectedTypes = [];
-    state.selectedAddresses = [];
-    state.selectedStatuses = [];
-    state.sortBy = "none";
-    closeModal();
-    renderChips();
-    renderList();
-    if (state.view === "map") renderMapMarkers();
-  };
+  return { success: true, ticket: ticket };
 }
 
-document.getElementById("modalOverlay").addEventListener("click", (e) => {
-  if (e.target.id === "modalOverlay") closeModal();
-});
-
-document.getElementById("fabAdd").addEventListener("click", () => {
-  openAddMachineForm();
-});
-
-function openAddMachineForm() {
-  const overlay = document.getElementById("modalOverlay");
-  const modal = document.getElementById("modal");
-
-  const typeOptions = MACHINE_TYPES.map((t) => `<option value="${t}">${t}</option>`).join("");
-
-  modal.innerHTML = `
-    <button class="modal-close" id="modalClose">&times;</button>
-    <h2>Cadastrar máquina</h2>
-    <div class="modal-sub">${USING_REAL_BACKEND ? "Será salvo na sua planilha do Google Sheets" : "Conecte o Sheets em config.js para salvar de verdade"}</div>
-
-    <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
-      <input class="form-input" id="fName" placeholder="Nome da máquina (ex: CAT 320F)" />
-      <input class="form-input" id="fTag" placeholder="TAG / identificador" />
-      <select class="form-input" id="fType">${typeOptions}</select>
-      <input class="form-input" id="fAddress" placeholder="Endereço / localização inicial" />
-      <input class="form-input" id="fLat" placeholder="Latitude (ex: -23.5613)" />
-      <input class="form-input" id="fLng" placeholder="Longitude (ex: -46.6565)" />
-      <input class="form-input" id="fHorimetro" type="number" step="0.1" placeholder="Horímetro (horas)" />
-      <input class="form-input" id="fDataHorimetro" type="date" placeholder="Data do horímetro" />
-      <input class="form-input" id="fPesoTon" type="number" step="0.1" placeholder="Peso (toneladas)" />
-      <input type="file" accept="image/*" id="fPhoto" />
-    </div>
-
-    <button class="btn-primary" id="saveMachineBtn">Salvar máquina</button>
-    <button class="btn-secondary" id="cancelBtn">Cancelar</button>
-    <div id="saveStatus" style="text-align:center;font-size:12.5px;color:var(--text-faint);margin-top:8px;"></div>
-  `;
-
-  overlay.classList.add("open");
-  document.getElementById("modalClose").onclick = closeModal;
-  document.getElementById("cancelBtn").onclick = closeModal;
-  document.getElementById("saveMachineBtn").onclick = saveNewMachine;
+function listTickets_(machineId) {
+  const sheet = getMaintenanceSheet_();
+  const values = sheet.getDataRange().getValues();
+  let tickets = values.slice(1).filter((r) => r[0]).map((r) => rowToTicket_(r));
+  if (machineId) tickets = tickets.filter((t) => t.machineId === machineId);
+  return tickets.reverse(); // mais recentes primeiro
 }
 
-let toastTimeout = null;
-function showToast(message, type = "info", duration = 2500) {
-  const toast = document.getElementById("saveToast");
-  toast.textContent = message;
-  toast.className = `save-toast show ${type}`;
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => {
-    toast.classList.remove("show");
-  }, duration);
+function listTicketsResponse_(machineId, callback) {
+  return jsonpOrJson_({ tickets: listTickets_(machineId) }, callback);
 }
 
-function readMachineForm() {
-  return {
-    name: document.getElementById("fName").value.trim(),
-    tag: document.getElementById("fTag").value.trim(),
-    type: document.getElementById("fType").value,
-    address: document.getElementById("fAddress").value.trim() || "Localização não informada",
-    lat: parseFloat(document.getElementById("fLat").value) || -23.5613,
-    lng: parseFloat(document.getElementById("fLng").value) || -46.6565,
-    horimetro: parseFloat(document.getElementById("fHorimetro").value) || 0,
-    dataHorimetro: document.getElementById("fDataHorimetro").value || "",
-    pesoTon: parseFloat(document.getElementById("fPesoTon").value) || 0,
-    photoFile: document.getElementById("fPhoto").files[0],
-  };
-}
+function sendTicketEmail_(ticket) {
+  if (!MAINTENANCE_CONTACTS || !MAINTENANCE_CONTACTS.length) return;
 
-async function saveNewMachine() {
-  const f = readMachineForm();
-  const statusEl = document.getElementById("saveStatus");
-
-  if (!f.name || !f.tag) {
-    statusEl.textContent = "Preencha ao menos nome e TAG.";
-    return;
-  }
-  if (!USING_REAL_BACKEND) {
-    statusEl.textContent = "Cadastro real desativado: configure a API_URL em config.js primeiro.";
-    return;
+  const subject = "Novo ticket de manutenção - " + ticket.machineName + " (" + ticket.machineTag + ")";
+  const lines = [
+    "Novo chamado de manutenção registrado no app de máquinas.",
+    "",
+    "Máquina: " + ticket.machineName,
+    "TAG: " + ticket.machineTag,
+    "Horímetro: " + ticket.horimetro + " h",
+    "Tipo: " + ticket.tipo,
+    "Descrição: " + (ticket.descricao || "(sem descrição)"),
+    "Aberto em: " + ticket.dataAbertura,
+    "Responsável: " + (ticket.responsavel || "não informado"),
+  ];
+  if (ticket.fotos.length) {
+    lines.push("");
+    lines.push("Fotos:");
+    ticket.fotos.forEach((url) => lines.push(url));
   }
 
-  const tempId = "temp-" + Date.now();
-  const tempMachine = {
-    id: tempId,
-    tag: f.tag,
-    name: f.name,
-    type: f.type,
-    status: "operando",
-    address: f.address,
-    lat: f.lat,
-    lng: f.lng,
-    lastUpdate: new Date().toISOString().slice(0, 10),
-    photoUrl: "",
-    photoInitials: f.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase(),
-    photoColor: "#f97316",
-    horimetro: f.horimetro,
-    pesoTon: f.pesoTon,
-    dataHorimetro: f.dataHorimetro,
-  };
-
-  // otimista: já aparece na tela e fecha o formulário, sem esperar a planilha
-  MACHINES.push(tempMachine);
-  closeModal();
-  renderChips();
-  renderList();
-  if (state.view === "map") renderMapMarkers();
-  showToast("Salvando na planilha...", "info", 60000);
-
-  (async () => {
+  MAINTENANCE_CONTACTS.forEach((email) => {
     try {
-      const payload = { name: f.name, tag: f.tag, type: f.type, address: f.address, lat: f.lat, lng: f.lng, horimetro: f.horimetro, dataHorimetro: f.dataHorimetro, pesoTon: f.pesoTon };
-      if (f.photoFile) {
-        payload.photoBase64 = await fileToBase64(f.photoFile);
-        payload.photoMimeType = f.photoFile.type;
-      }
-      await createMachineInSheet(payload);
-      MACHINES = await fetchMachinesFromSheet();
-      renderChips();
-      renderList();
-      if (state.view === "map") renderMapMarkers();
-      showToast("Máquina salva ✓", "success");
+      MailApp.sendEmail({ to: email, subject: subject, body: lines.join("\n") });
     } catch (err) {
-      MACHINES = MACHINES.filter((m) => m.id !== tempId);
-      renderList();
-      showToast("Erro ao salvar. Tente novamente.", "error", 4000);
+      // ignora falha de envio pra um contato específico e segue tentando os demais
     }
-  })();
+  });
 }
 
-// ---------- edit machine ----------
+// ---------- autenticação por código de e-mail ----------
 
-function openEditMachineForm(machine) {
-  const overlay = document.getElementById("modalOverlay");
-  const modal = document.getElementById("modal");
-
-  const typeOptions = MACHINE_TYPES.map(
-    (t) => `<option value="${t}" ${t === machine.type ? "selected" : ""}>${t}</option>`
-  ).join("");
-
-  modal.innerHTML = `
-    <button class="modal-close" id="modalClose">&times;</button>
-    <h2>Editar máquina</h2>
-    <div class="modal-sub">${USING_REAL_BACKEND ? "As alterações são salvas na sua planilha" : "Conecte o Sheets em config.js para salvar de verdade"}</div>
-
-    <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
-      <input class="form-input" id="fName" placeholder="Nome da máquina" value="${machine.name}" />
-      <input class="form-input" id="fTag" placeholder="TAG / identificador" value="${machine.tag}" />
-      <select class="form-input" id="fType">${typeOptions}</select>
-      <select class="form-input" id="fStatus">
-        <option value="operando" ${machine.status === "operando" ? "selected" : ""}>Operando</option>
-        <option value="nao_operando" ${machine.status === "nao_operando" ? "selected" : ""}>Não operando</option>
-      </select>
-      <input class="form-input" id="fAddress" placeholder="Endereço / localização" value="${machine.address}" />
-      <input class="form-input" id="fLat" placeholder="Latitude" value="${machine.lat}" />
-      <input class="form-input" id="fLng" placeholder="Longitude" value="${machine.lng}" />
-      <input class="form-input" id="fHorimetro" type="number" step="0.1" placeholder="Horímetro (horas)" value="${machine.horimetro || 0}" />
-      <input class="form-input" id="fDataHorimetro" type="date" value="${machine.dataHorimetro || ""}" />
-      <input class="form-input" id="fPesoTon" type="number" step="0.1" placeholder="Peso (toneladas)" value="${machine.pesoTon || 0}" />
-      <div style="font-size:12.5px;color:var(--text-faint);">Trocar foto (opcional):</div>
-      <input type="file" accept="image/*" id="fPhoto" />
-    </div>
-
-    <button class="btn-primary" id="saveEditBtn">Salvar alterações</button>
-    <button class="btn-secondary" id="cancelBtn">Cancelar</button>
-    <div id="saveStatus" style="text-align:center;font-size:12.5px;color:var(--text-faint);margin-top:8px;"></div>
-  `;
-
-  overlay.classList.add("open");
-  document.getElementById("modalClose").onclick = closeModal;
-  document.getElementById("cancelBtn").onclick = closeModal;
-  document.getElementById("saveEditBtn").onclick = () => saveEditedMachine(machine.id);
+function getSessionsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SESSIONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SESSIONS_SHEET_NAME);
+    sheet.appendRow(["email", "code", "codeExpiresAt", "token", "tokenExpiresAt"]);
+  }
+  return sheet;
 }
 
-async function saveEditedMachine(id) {
-  const f = readMachineForm();
-  const status = document.getElementById("fStatus").value;
-  const statusEl = document.getElementById("saveStatus");
-
-  if (!f.name || !f.tag) {
-    statusEl.textContent = "Preencha ao menos nome e TAG.";
-    return;
+function findSessionRow_(sheet, email) {
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]).toLowerCase() === email.toLowerCase()) return i + 1;
   }
-  if (!USING_REAL_BACKEND) {
-    statusEl.textContent = "Edição real desativada: configure a API_URL em config.js primeiro.";
-    return;
-  }
-
-  const machine = MACHINES.find((m) => m.id === id);
-  const previous = machine ? { ...machine } : null;
-
-  // otimista: aplica as mudanças na tela na hora
-  if (machine) {
-    Object.assign(machine, {
-      name: f.name,
-      tag: f.tag,
-      type: f.type,
-      status,
-      address: f.address,
-      lat: f.lat,
-      lng: f.lng,
-      horimetro: f.horimetro,
-      dataHorimetro: f.dataHorimetro,
-      pesoTon: f.pesoTon,
-      photoInitials: f.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase(),
-    });
-  }
-  closeModal();
-  renderChips();
-  renderList();
-  if (state.view === "map") renderMapMarkers();
-  showToast("Salvando alterações...", "info", 60000);
-
-  (async () => {
-    try {
-      const payload = { id, name: f.name, tag: f.tag, type: f.type, status, address: f.address, lat: f.lat, lng: f.lng, horimetro: f.horimetro, dataHorimetro: f.dataHorimetro, pesoTon: f.pesoTon };
-      if (f.photoFile) {
-        payload.photoBase64 = await fileToBase64(f.photoFile);
-        payload.photoMimeType = f.photoFile.type;
-      }
-      await updateMachineInSheet(payload);
-      MACHINES = await fetchMachinesFromSheet();
-      renderChips();
-      renderList();
-      if (state.view === "map") renderMapMarkers();
-      showToast("Alterações salvas ✓", "success");
-    } catch (err) {
-      if (machine && previous) Object.assign(machine, previous);
-      renderList();
-      showToast("Erro ao salvar. Tente novamente.", "error", 4000);
-    }
-  })();
+  return -1;
 }
 
-// ---------- boot ----------
+function requestCodeResponse_(email, callback) {
+  email = (email || "").trim().toLowerCase();
+  if (!email || !email.endsWith("@" + ALLOWED_EMAIL_DOMAIN)) {
+    return jsonpOrJson_({ success: false, error: "Use um e-mail @" + ALLOWED_EMAIL_DOMAIN }, callback);
+  }
 
-async function boot() {
-  renderChips();
-  document.getElementById("machineCount").textContent = USING_REAL_BACKEND ? "Carregando..." : "6 máquinas rastreadas";
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = new Date(Date.now() + CODE_VALID_MINUTES * 60 * 1000).getTime();
 
-  if (USING_REAL_BACKEND) {
-    document.getElementById("listView").innerHTML = `<div class="empty-state">Carregando máquinas da planilha...</div>`;
-    try {
-      MACHINES = await fetchMachinesFromSheet();
-    } catch (err) {
-      document.getElementById("machineCount").textContent = "Erro ao carregar";
-      document.getElementById("listView").innerHTML =
-        `<div class="empty-state">Não foi possível carregar a planilha.<br/>Verifique a API_URL em config.js e se a implantação está pública.</div>`;
-      return;
-    }
+  const sheet = getSessionsSheet_();
+  let rowIndex = findSessionRow_(sheet, email);
+  if (rowIndex === -1) {
+    sheet.appendRow([email, code, expiresAt, "", ""]);
   } else {
-    MACHINES = MOCK_MACHINES;
+    sheet.getRange(rowIndex, 2, 1, 2).setValues([[code, expiresAt]]);
   }
 
-  renderChips();
-  renderList();
+  MailApp.sendEmail({
+    to: email,
+    subject: "Seu código de acesso - Máquinas COMDARPE",
+    body:
+      "Seu código de acesso é: " + code +
+      "\n\nVálido por " + CODE_VALID_MINUTES + " minutos." +
+      "\n\nSe você não pediu esse código, pode ignorar este e-mail.",
+  });
+
+  return jsonpOrJson_({ success: true }, callback);
 }
 
-boot();
+function verifyCodeResponse_(email, code, callback) {
+  email = (email || "").trim().toLowerCase();
+  const sheet = getSessionsSheet_();
+  const rowIndex = findSessionRow_(sheet, email);
+
+  if (rowIndex === -1) {
+    return jsonpOrJson_({ success: false, error: "Código inválido ou expirado" }, callback);
+  }
+
+  const row = sheet.getRange(rowIndex, 1, 1, 5).getValues()[0];
+  const savedCode = String(row[1]);
+  const codeExpiresAt = Number(row[2]);
+
+  if (!code || savedCode !== String(code).trim() || Date.now() > codeExpiresAt) {
+    return jsonpOrJson_({ success: false, error: "Código inválido ou expirado" }, callback);
+  }
+
+  const token = Utilities.getUuid();
+  const tokenExpiresAt = new Date(Date.now() + SESSION_VALID_HOURS * 60 * 60 * 1000).getTime();
+  sheet.getRange(rowIndex, 2, 1, 4).setValues([["", "", token, tokenExpiresAt]]);
+
+  return jsonpOrJson_({ success: true, token: token, expiresAt: tokenExpiresAt }, callback);
+}
+
+function isValidSession_(token) {
+  if (!token) return false;
+  const sheet = getSessionsSheet_();
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][3] === token) {
+      return Date.now() < Number(values[i][4]);
+    }
+  }
+  return false;
+}
+
+function checkSessionResponse_(token, callback) {
+  return jsonpOrJson_({ valid: isValidSession_(token) }, callback);
+}
+
+function authErrorResponse_(callback) {
+  return jsonpOrJson_({ error: "sessão inválida ou expirada" }, callback);
+}
+
+function jsonpOrJson_(obj, callback) {
+  if (callback) {
+    return ContentService
+      .createTextOutput(callback + "(" + JSON.stringify(obj) + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return jsonResponse_(obj);
+}
+
+// ---------- sheet helpers ----------
+
+function getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("Aba '" + SHEET_NAME + "' não encontrada.");
+  return sheet;
+}
+
+const HEADERS = [
+  "id", "tag", "name", "type", "status", "address",
+  "lat", "lng", "lastUpdate", "photoUrl", "photoInitials", "photoColor",
+  "horimetro", "pesoTon", "dataHorimetro",
+];
+
+function listMachines_() {
+  const sheet = getSheet_();
+  const values = sheet.getDataRange().getValues();
+  const rows = values.slice(1); // remove cabeçalho
+  return rows
+    .filter((r) => r[0]) // ignora linhas vazias
+    .map((r) => rowToMachine_(r));
+}
+
+function rowToMachine_(r) {
+  const obj = {};
+  HEADERS.forEach((h, i) => (obj[h] = r[i]));
+  obj.lat = Number(obj.lat);
+  obj.lng = Number(obj.lng);
+  obj.horimetro = Number(obj.horimetro) || 0;
+  obj.pesoTon = Number(obj.pesoTon) || 0;
+  if (obj.dataHorimetro instanceof Date) {
+    obj.dataHorimetro = Utilities.formatDate(obj.dataHorimetro, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  if (obj.lastUpdate instanceof Date) {
+    obj.lastUpdate = Utilities.formatDate(obj.lastUpdate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return obj;
+}
+
+function findRowIndexById_(sheet, id) {
+  const ids = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 0), 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i][0] === id) return i + 2; // +2: cabeçalho + índice base 1
+  }
+  return -1;
+}
+
+function nextId_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const n = lastRow; // linha 1 = cabeçalho, então lastRow já é a contagem certa +0
+  return "MAQ-" + String(n).padStart(3, "0");
+}
+
+function initialsFrom_(name) {
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+}
+
+function colorFor_(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+}
+
+// ---------- create / update ----------
+
+function createMachine_(body) {
+  const sheet = getSheet_();
+  const id = nextId_(sheet);
+
+  let photoUrl = "";
+  if (body.photoBase64) {
+    photoUrl = uploadPhoto_(body.photoBase64, body.photoMimeType || "image/jpeg", id + ".jpg");
+  }
+
+  const row = [
+    id,
+    body.tag || "",
+    body.name || "",
+    body.type || "",
+    "operando",
+    body.address || "Localização não informada",
+    body.lat || "",
+    body.lng || "",
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd"),
+    photoUrl,
+    initialsFrom_(body.name || "??"),
+    colorFor_(body.name || id),
+    body.horimetro || 0,
+    body.pesoTon || 0,
+    body.dataHorimetro || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd"),
+  ];
+
+  sheet.appendRow(row);
+  return { success: true, machine: rowToMachine_(row) };
+}
+
+function updateMachine_(body) {
+  const sheet = getSheet_();
+  const rowIndex = findRowIndexById_(sheet, body.id);
+  if (rowIndex === -1) return { error: "máquina não encontrada" };
+
+  const textFields = ["tag", "name", "type", "address", "status"];
+  textFields.forEach((field) => {
+    if (body[field] !== undefined && body[field] !== "") {
+      sheet.getRange(rowIndex, HEADERS.indexOf(field) + 1).setValue(body[field]);
+    }
+  });
+
+  if (body.lat !== undefined && body.lat !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("lat") + 1).setValue(Number(body.lat));
+  }
+  if (body.lng !== undefined && body.lng !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("lng") + 1).setValue(Number(body.lng));
+  }
+  if (body.horimetro !== undefined && body.horimetro !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("horimetro") + 1).setValue(Number(body.horimetro));
+  }
+  if (body.pesoTon !== undefined && body.pesoTon !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("pesoTon") + 1).setValue(Number(body.pesoTon));
+  }
+  if (body.dataHorimetro !== undefined && body.dataHorimetro !== "") {
+    sheet.getRange(rowIndex, HEADERS.indexOf("dataHorimetro") + 1).setValue(body.dataHorimetro);
+  }
+
+  if (body.name) {
+    sheet.getRange(rowIndex, HEADERS.indexOf("photoInitials") + 1).setValue(initialsFrom_(body.name));
+  }
+
+  if (body.photoBase64) {
+    const photoUrl = uploadPhoto_(body.photoBase64, body.photoMimeType || "image/jpeg", body.id + ".jpg");
+    sheet.getRange(rowIndex, HEADERS.indexOf("photoUrl") + 1).setValue(photoUrl);
+  }
+
+  sheet.getRange(rowIndex, HEADERS.indexOf("lastUpdate") + 1).setValue(
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd")
+  );
+
+  return { success: true };
+}
+
+function updateStatus_(body) {
+  const sheet = getSheet_();
+  const rowIndex = findRowIndexById_(sheet, body.id);
+  if (rowIndex === -1) return { error: "máquina não encontrada" };
+  sheet.getRange(rowIndex, HEADERS.indexOf("status") + 1).setValue(body.status);
+  return { success: true };
+}
+
+function uploadPhoto_(base64Data, mimeType, fileName) {
+  let folder = null;
+  const folders = DriveApp.getFoldersByName(PHOTOS_FOLDER_NAME);
+  folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTOS_FOLDER_NAME);
+
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, fileName);
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w200";
+}
+
+// ---------- QR check-in flow ----------
+
+function checkinPage_(id) {
+  const sheet = getSheet_();
+  const rowIndex = findRowIndexById_(sheet, id);
+  if (rowIndex === -1) {
+    return HtmlService.createHtmlOutput("<h2>Máquina não encontrada.</h2>");
+  }
+  const machine = rowToMachine_(sheet.getRange(rowIndex, 1, 1, HEADERS.length).getValues()[0]);
+  const scriptUrl = ScriptApp.getService().getUrl();
+
+  const html = `
+    <!doctype html><html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0b0e;color:#f2f2f4;
+           display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;text-align:center}
+      .card{max-width:360px}
+      h1{font-size:20px;margin-bottom:6px}
+      p{color:#9a9aa5;font-size:14px;margin-bottom:24px}
+      button{background:#f97316;color:#1a0f00;border:none;border-radius:12px;padding:14px 22px;
+             font-weight:700;font-size:15px;cursor:pointer;width:100%}
+      #status{margin-top:16px;font-size:13px;color:#9a9aa5}
+    </style></head>
+    <body>
+      <div class="card">
+        <h1>Check-in: ${machine.name}</h1>
+        <p>TAG ${machine.tag} · ${machine.type}</p>
+        <button id="btn" onclick="doCheckin()">Confirmar minha localização</button>
+        <div id="status"></div>
+      </div>
+      <script>
+        function doCheckin() {
+          document.getElementById('status').textContent = 'Obtendo localização...';
+          navigator.geolocation.getCurrentPosition(function(pos) {
+            var url = "${scriptUrl}?action=update-location&id=${id}"
+              + "&lat=" + pos.coords.latitude
+              + "&lng=" + pos.coords.longitude;
+            window.location.href = url;
+          }, function() {
+            document.getElementById('status').textContent = 'Permissão de localização negada.';
+          });
+        }
+      </script>
+    </body></html>`;
+  return HtmlService.createHtmlOutput(html);
+}
+
+function updateLocationAndRespond_(params) {
+  const sheet = getSheet_();
+  const rowIndex = findRowIndexById_(sheet, params.id);
+  if (rowIndex === -1) {
+    return HtmlService.createHtmlOutput("<h2>Máquina não encontrada.</h2>");
+  }
+
+  sheet.getRange(rowIndex, HEADERS.indexOf("lat") + 1).setValue(Number(params.lat));
+  sheet.getRange(rowIndex, HEADERS.indexOf("lng") + 1).setValue(Number(params.lng));
+  sheet.getRange(rowIndex, HEADERS.indexOf("address") + 1).setValue("Atualizado via check-in (GPS)");
+  sheet.getRange(rowIndex, HEADERS.indexOf("lastUpdate") + 1).setValue(
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd")
+  );
+  sheet.getRange(rowIndex, HEADERS.indexOf("status") + 1).setValue("operando");
+
+  return HtmlService.createHtmlOutput(
+    `<!doctype html><html><head><meta charset="utf-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1"></head>
+     <body style="font-family:-apple-system,sans-serif;background:#0b0b0e;color:#f2f2f4;
+       display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center">
+       <div><h1 style="color:#22c55e">Check-in realizado ✓</h1>
+       <p style="color:#9a9aa5">Localização atualizada com sucesso. Pode fechar esta página.</p></div>
+     </body></html>`
+  );
+}
+
+// ---------- utils ----------
+
+function listResponse_(callback) {
+  const machines = listMachines_();
+  if (callback) {
+    // JSONP: entrega o JSON embrulhado numa chamada de função JS.
+    // Isso não é bloqueado por CORS porque é carregado como uma <script>, não um fetch/XHR.
+    return ContentService
+      .createTextOutput(callback + "(" + JSON.stringify({ machines: machines }) + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return jsonResponse_({ machines: machines });
+}
+
+function jsonResponse_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}

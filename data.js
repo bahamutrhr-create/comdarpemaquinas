@@ -1,133 +1,19 @@
-// data.js
-// Fonte de dados das máquinas.
-// Hoje: array mockado local.
-// Amanhã: troque MACHINES por um fetch() na API do Google Sheets
-// (ex: usando o Google Sheets API v4, lendo esta mesma estrutura de campos).
+// config.js
+//
+// Depois de implantar o Apps Script (veja apps-script/Code.gs), cole aqui
+// a URL que termina em /exec. Enquanto estiver com o valor abaixo,
+// o app usa os dados de exemplo (MOCK_MACHINES em data.js) para você
+// continuar testando o layout sem depender da planilha.
 
-const MACHINE_TYPES = [
-  "Escavadeira Hidráulica",
-  "Mini Escavadeira Hidráulica",
-  "Retroescavadeira",
-  "Pá Carregadeira",
-  "Mini Carregadeira",
-  "Trator de Esteira",
-  "Trator Agrícola",
-  "Motoniveladora",
-  "Acabadora",
-  "Fresadora",
-  "Rolo Compactador",
-  "Rolo Compactador Pé de Carneiro",
-  "Rolo Compactador Chapa",
-  "Rolo Compactador Pneu",
-  "Máquina Extrusora",
-  "Guindaste",
-  "Manipulador Telescópico",
-  "Plataforma Elevatória",
-  "Empilhadeira",
-  "Caminhão Comboio",
-  "Caminhão Basculante",
-  "Caminhão Fora de Estrada",
-  "Caminhão Pipa",
-  "Caminhão Carroceria",
-  "Veículo Leve",
-  "Ônibus",
-];
+const CONFIG = {
+  API_URL: "https://script.google.com/macros/s/AKfycbyoFCCPEUP3ccJGEu-3xphOZxBgEz0Ax3N-157MciVzp6sxTJYzQtVF6JXiPNgQPPfP/exec",
 
-const MOCK_MACHINES = [
-  {
-    id: "MAQ-001",
-    tag: "CAT-320F-001",
-    name: "CAT 320F",
-    type: "Escavadeira Hidráulica",
-    status: "operando",
-    address: "Rua Santa Teresa, Glicério, São Paulo, São Paulo",
-    lat: -23.5504,
-    lng: -46.6296,
-    lastUpdate: "2026-04-05",
-    photoInitials: "CAT",
-    photoColor: "#d4a35a",
-    horimetro: 1240,
-    pesoTon: 11.5,
-    dataHorimetro: "2026-07-02",
-  },
-  {
-    id: "MAQ-002",
-    tag: "KOM-PC210-002",
-    name: "Komatsu PC210",
-    type: "Escavadeira Hidráulica",
-    status: "nao_operando",
-    address: "Avenida Paulista, Morro dos Ingleses, São Paulo, São Paulo",
-    lat: -23.5613,
-    lng: -46.6565,
-    lastUpdate: "2026-03-07",
-    photoInitials: "KOM",
-    photoColor: "#3a6ea5",
-    horimetro: 3180,
-    pesoTon: 11.8,
-    dataHorimetro: "2026-07-02",
-  },
-  {
-    id: "MAQ-003",
-    tag: "JCB-3CX-003",
-    name: "JCB 3CX",
-    type: "Retroescavadeira",
-    status: "operando",
-    address: "Parque Anhangabaú, República, São Paulo, São Paulo",
-    lat: -23.5450,
-    lng: -46.6388,
-    lastUpdate: "2026-04-05",
-    photoInitials: "JCB",
-    photoColor: "#c23b3b",
-    horimetro: 860,
-    pesoTon: 4.26,
-    dataHorimetro: "2026-07-02",
-  },
-  {
-    id: "MAQ-004",
-    tag: "LIE-LTM1300-004",
-    name: "Liebherr LTM 1300",
-    type: "Guindaste",
-    status: "nao_operando",
-    address: "Marginal Pinheiros, Pinheiros, São Paulo, São Paulo",
-    lat: -23.5745,
-    lng: -46.6942,
-    lastUpdate: "2026-02-20",
-    photoInitials: "LIE",
-    photoColor: "#e0a300",
-    horimetro: 2510,
-    pesoTon: 14.9,
-    dataHorimetro: "2026-07-02",
-  },
-  {
-    id: "MAQ-005",
-    tag: "CAT-950M-005",
-    name: "Caterpillar 950M",
-    type: "Pá Carregadeira",
-    status: "operando",
-    address: "Avenida Faria Lima, Itaim Bibi, São Paulo, São Paulo",
-    lat: -23.5870,
-    lng: -46.6844,
-    lastUpdate: "2026-06-01",
-    photoInitials: "CAT",
-    photoColor: "#d4a35a",
-    horimetro: 430,
-    pesoTon: 3.0,
-    dataHorimetro: "2026-07-02",
-  },
-  {
-    id: "MAQ-006",
-    tag: "CAT-D6T-006",
-    name: "Caterpillar D6T",
-    type: "Trator de Esteira",
-    status: "nao_operando",
-    address: "Parque Ibirapuera, Vila Mariana, São Paulo, São Paulo",
-    lat: -23.5874,
-    lng: -46.6576,
-    lastUpdate: "2026-01-15",
-    photoInitials: "CAT",
-    photoColor: "#d4a35a",
-    horimetro: 1990,
-    pesoTon: 14.0,
-    dataHorimetro: "2026-07-02",
-  },
-];
+  // Opcional: cole aqui uma chave da Google Maps JavaScript API para usar o
+  // Google Maps de verdade na aba "MAPA" (precisa de projeto no Google Cloud
+  // com faturamento habilitado + a API "Maps JavaScript API" ativada).
+  // Enquanto deixar como está, o app usa OpenStreetMap (gratuito, sem chave).
+  GOOGLE_MAPS_API_KEY: "COLE_AQUI_SUA_CHAVE_DO_GOOGLE_MAPS",
+};
+
+const USING_REAL_BACKEND = !CONFIG.API_URL.startsWith("COLE_AQUI");
+const USING_GOOGLE_MAPS = !CONFIG.GOOGLE_MAPS_API_KEY.startsWith("COLE_AQUI");

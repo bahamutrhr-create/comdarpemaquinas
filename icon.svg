@@ -1,10 +1,133 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="20" fill="#0b0b0e"/>
-  <rect x="14" y="14" width="72" height="72" rx="14" fill="#f97316"/>
-  <g stroke="#1a0f00" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="26" y="40" width="34" height="26" />
-    <polygon points="60 48 72 48 78 56 78 66 60 66" />
-    <circle cx="34" cy="72" r="6" />
-    <circle cx="66" cy="72" r="6" />
-  </g>
-</svg>
+// data.js
+// Fonte de dados das máquinas.
+// Hoje: array mockado local.
+// Amanhã: troque MACHINES por um fetch() na API do Google Sheets
+// (ex: usando o Google Sheets API v4, lendo esta mesma estrutura de campos).
+
+const MACHINE_TYPES = [
+  "Escavadeira Hidráulica",
+  "Mini Escavadeira Hidráulica",
+  "Retroescavadeira",
+  "Pá Carregadeira",
+  "Mini Carregadeira",
+  "Trator de Esteira",
+  "Trator Agrícola",
+  "Motoniveladora",
+  "Acabadora",
+  "Fresadora",
+  "Rolo Compactador",
+  "Rolo Compactador Pé de Carneiro",
+  "Rolo Compactador Chapa",
+  "Rolo Compactador Pneu",
+  "Máquina Extrusora",
+  "Guindaste",
+  "Manipulador Telescópico",
+  "Plataforma Elevatória",
+  "Empilhadeira",
+  "Caminhão Comboio",
+  "Caminhão Basculante",
+  "Caminhão Fora de Estrada",
+  "Caminhão Pipa",
+  "Caminhão Carroceria",
+  "Veículo Leve",
+  "Ônibus",
+];
+
+const MOCK_MACHINES = [
+  {
+    id: "MAQ-001",
+    tag: "CAT-320F-001",
+    name: "CAT 320F",
+    type: "Escavadeira Hidráulica",
+    status: "operando",
+    address: "Rua Santa Teresa, Glicério, São Paulo, São Paulo",
+    lat: -23.5504,
+    lng: -46.6296,
+    lastUpdate: "2026-04-05",
+    photoInitials: "CAT",
+    photoColor: "#d4a35a",
+    horimetro: 1240,
+    pesoTon: 11.5,
+    dataHorimetro: "2026-07-02",
+  },
+  {
+    id: "MAQ-002",
+    tag: "KOM-PC210-002",
+    name: "Komatsu PC210",
+    type: "Escavadeira Hidráulica",
+    status: "nao_operando",
+    address: "Avenida Paulista, Morro dos Ingleses, São Paulo, São Paulo",
+    lat: -23.5613,
+    lng: -46.6565,
+    lastUpdate: "2026-03-07",
+    photoInitials: "KOM",
+    photoColor: "#3a6ea5",
+    horimetro: 3180,
+    pesoTon: 11.8,
+    dataHorimetro: "2026-07-02",
+  },
+  {
+    id: "MAQ-003",
+    tag: "JCB-3CX-003",
+    name: "JCB 3CX",
+    type: "Retroescavadeira",
+    status: "operando",
+    address: "Parque Anhangabaú, República, São Paulo, São Paulo",
+    lat: -23.5450,
+    lng: -46.6388,
+    lastUpdate: "2026-04-05",
+    photoInitials: "JCB",
+    photoColor: "#c23b3b",
+    horimetro: 860,
+    pesoTon: 4.26,
+    dataHorimetro: "2026-07-02",
+  },
+  {
+    id: "MAQ-004",
+    tag: "LIE-LTM1300-004",
+    name: "Liebherr LTM 1300",
+    type: "Guindaste",
+    status: "nao_operando",
+    address: "Marginal Pinheiros, Pinheiros, São Paulo, São Paulo",
+    lat: -23.5745,
+    lng: -46.6942,
+    lastUpdate: "2026-02-20",
+    photoInitials: "LIE",
+    photoColor: "#e0a300",
+    horimetro: 2510,
+    pesoTon: 14.9,
+    dataHorimetro: "2026-07-02",
+  },
+  {
+    id: "MAQ-005",
+    tag: "CAT-950M-005",
+    name: "Caterpillar 950M",
+    type: "Pá Carregadeira",
+    status: "operando",
+    address: "Avenida Faria Lima, Itaim Bibi, São Paulo, São Paulo",
+    lat: -23.5870,
+    lng: -46.6844,
+    lastUpdate: "2026-06-01",
+    photoInitials: "CAT",
+    photoColor: "#d4a35a",
+    horimetro: 430,
+    pesoTon: 3.0,
+    dataHorimetro: "2026-07-02",
+  },
+  {
+    id: "MAQ-006",
+    tag: "CAT-D6T-006",
+    name: "Caterpillar D6T",
+    type: "Trator de Esteira",
+    status: "nao_operando",
+    address: "Parque Ibirapuera, Vila Mariana, São Paulo, São Paulo",
+    lat: -23.5874,
+    lng: -46.6576,
+    lastUpdate: "2026-01-15",
+    photoInitials: "CAT",
+    photoColor: "#d4a35a",
+    horimetro: 1990,
+    pesoTon: 14.0,
+    dataHorimetro: "2026-07-02",
+  },
+];
