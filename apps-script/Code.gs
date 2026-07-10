@@ -23,13 +23,19 @@ const SESSIONS_SHEET_NAME = "Sessions";
 const MAINTENANCE_SHEET_NAME = "Manutencoes";
 const PHOTOS_FOLDER_NAME = "Fotos Maquinas App";
 const PALETTE = ["#d4a35a", "#3a6ea5", "#c23b3b", "#e0a300", "#5aa06c", "#8a5ac2"];
-const ALLOWED_EMAIL_DOMAIN = "comdarpe.com";
+const ALLOWED_EMAIL_DOMAIN = "comdarpe.com.br";
 const CODE_VALID_MINUTES = 10;
 const SESSION_VALID_HOURS = 24;
 
 // E-mails que recebem aviso de novo ticket de manutenção. Adicione mais
 // endereços aqui separados por vírgula conforme precisar.
 const MAINTENANCE_CONTACTS = ["engenharia15@comdarpe.com.br"];
+
+// Trava de login por código de e-mail. Deixe "false" enquanto essa parte
+// estiver pausada — todas as ações funcionam sem exigir sessão válida.
+// Mude para "true" só quando quiser reativar a exigência de login
+// (e lembre de trocar REQUIRE_LOGIN para "true" no config.js também).
+const REQUIRE_LOGIN = false;
 
 // ---------- entrypoints ----------
 
@@ -59,7 +65,7 @@ function doGet(e) {
   }
 
   // tudo abaixo exige sessão válida
-  if (!isValidSession_(e.parameter.token)) {
+  if (REQUIRE_LOGIN && !isValidSession_(e.parameter.token)) {
     return authErrorResponse_(e.parameter.callback);
   }
   if (action === "list") {
@@ -81,7 +87,7 @@ function doPost(e) {
     return jsonResponse_(createTicket_(body));
   }
 
-  if (!isValidSession_(body.token)) {
+  if (REQUIRE_LOGIN && !isValidSession_(body.token)) {
     return jsonResponse_({ error: "sessão inválida ou expirada, faça login novamente" });
   }
 

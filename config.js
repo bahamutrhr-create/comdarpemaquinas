@@ -6,7 +6,7 @@
 // continuar testando o layout sem depender da planilha.
 
 const CONFIG = {
-  API_URL: "https://script.google.com/macros/s/AKfycbwCkcyluOT1mORMAQsbCZ40Zn-9QD5ZSjeiYGgCQ9oIxHGNEHUKITcllgiIVLr_ftBV/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycbyoFCCPEUP3ccJGEu-3xphOZxBgEz0Ax3N-157MciVzp6sxTJYzQtVF6JXiPNgQPPfP/exec",
 
   // Opcional: cole aqui uma chave da Google Maps JavaScript API para usar o
   // Google Maps de verdade na aba "MAPA" (precisa de projeto no Google Cloud
