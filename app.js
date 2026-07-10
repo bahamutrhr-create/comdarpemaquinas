@@ -980,8 +980,8 @@ function setLoginMsg(text, type = "") {
 
 document.getElementById("sendCodeBtn").addEventListener("click", async () => {
   const email = document.getElementById("loginEmail").value.trim().toLowerCase();
-  if (!email.endsWith("@comdarpe.com")) {
-    setLoginMsg("Use um e-mail @comdarpe.com", "error");
+  if (!email.endsWith("@comdarpe.com.br")) {
+    setLoginMsg("Use um e-mail @comdarpe.com.br", "error");
     return;
   }
   setLoginMsg("Enviando código...");
@@ -1033,7 +1033,7 @@ document.getElementById("backToEmailBtn").addEventListener("click", () => {
 });
 
 async function initAuth() {
-  if (!USING_REAL_BACKEND) {
+  if (!USING_REAL_BACKEND || !REQUIRE_LOGIN) {
     showMainApp();
     boot();
     return;
