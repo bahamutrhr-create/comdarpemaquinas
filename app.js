@@ -960,108 +960,10 @@ async function saveEditedMachine(id) {
   })();
 }
 
-// ---------- login (código por e-mail) ----------
-
-function showLoginScreen() {
-  document.getElementById("loginScreen").style.display = "flex";
-  document.getElementById("mainApp").style.display = "none";
-}
-
-function showMainApp() {
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("mainApp").style.display = "flex";
-}
-
-function setLoginMsg(text, type = "") {
-  const el = document.getElementById("loginMsg");
-  el.textContent = text;
-  el.className = "login-msg " + type;
-}
-
-document.getElementById("sendCodeBtn").addEventListener("click", async () => {
-  const email = document.getElementById("loginEmail").value.trim().toLowerCase();
-  if (!email.endsWith("@comdarpe.com.br")) {
-    setLoginMsg("Use um e-mail @comdarpe.com.br", "error");
-    return;
-  }
-  setLoginMsg("Enviando código...");
-  try {
-    const res = await requestLoginCode(email);
-    if (!res.success) {
-      setLoginMsg(res.error || "Não foi possível enviar o código.", "error");
-      return;
-    }
-    document.getElementById("loginStep1").style.display = "none";
-    document.getElementById("loginStep2").style.display = "block";
-    document.getElementById("codeSentTo").textContent = `Código enviado para ${email}`;
-    setLoginMsg("");
-  } catch (err) {
-    setLoginMsg("Erro de conexão. Tente novamente.", "error");
-  }
-});
-
-document.getElementById("confirmCodeBtn").addEventListener("click", async () => {
-  const email = document.getElementById("loginEmail").value.trim().toLowerCase();
-  const code = document.getElementById("loginCode").value.trim();
-  if (!code) {
-    setLoginMsg("Digite o código recebido por e-mail.", "error");
-    return;
-  }
-  setLoginMsg("Verificando...");
-  try {
-    const res = await verifyLoginCode(email, code);
-    if (!res.success) {
-      setLoginMsg(res.error || "Código inválido ou expirado.", "error");
-      return;
-    }
-    saveSession({ token: res.token, expiresAt: res.expiresAt, email });
-    setLoginMsg("Acesso liberado ✓", "success");
-    setTimeout(() => {
-      showMainApp();
-      boot();
-    }, 400);
-  } catch (err) {
-    setLoginMsg("Erro de conexão. Tente novamente.", "error");
-  }
-});
-
-document.getElementById("backToEmailBtn").addEventListener("click", () => {
-  document.getElementById("loginStep1").style.display = "block";
-  document.getElementById("loginStep2").style.display = "none";
-  document.getElementById("loginCode").value = "";
-  setLoginMsg("");
-});
-
-async function initAuth() {
-  if (!USING_REAL_BACKEND || !REQUIRE_LOGIN) {
-    showMainApp();
-    boot();
-    return;
-  }
-  const session = getSavedSession();
-  if (!session) {
-    showLoginScreen();
-    return;
-  }
-  try {
-    const valid = await checkSessionValid(session.token);
-    if (valid) {
-      showMainApp();
-      boot();
-    } else {
-      clearSession();
-      showLoginScreen();
-    }
-  } catch (err) {
-    // sem conexão pra validar: usa a sessão salva localmente por otimismo
-    showMainApp();
-    boot();
-  }
-}
-
 // ---------- boot ----------
 
 async function boot() {
+  document.getElementById("mainApp").style.display = "flex";
   renderChips();
   document.getElementById("machineCount").textContent = USING_REAL_BACKEND ? "Carregando..." : "6 máquinas rastreadas";
 
@@ -1089,7 +991,7 @@ function playSplashThenStart() {
     splash.classList.add("hide");
     setTimeout(() => {
       splash.style.display = "none";
-      initAuth();
+      boot();
     }, 350);
   }, 900);
 }

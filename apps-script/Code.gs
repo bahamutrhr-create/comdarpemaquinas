@@ -64,10 +64,6 @@ function doGet(e) {
     return listTicketsResponse_(e.parameter.machineId, e.parameter.callback);
   }
 
-  // tudo abaixo exige sessão válida
-  if (REQUIRE_LOGIN && !isValidSession_(e.parameter.token)) {
-    return authErrorResponse_(e.parameter.callback);
-  }
   if (action === "list") {
     return listResponse_(e.parameter.callback);
   }
@@ -85,10 +81,6 @@ function doPost(e) {
   // tickets de manutenção ficam fora da trava por enquanto (login em pausa)
   if (body.action === "create-ticket") {
     return jsonResponse_(createTicket_(body));
-  }
-
-  if (REQUIRE_LOGIN && !isValidSession_(body.token)) {
-    return jsonResponse_({ error: "sessão inválida ou expirada, faça login novamente" });
   }
 
   if (body.action === "create") {

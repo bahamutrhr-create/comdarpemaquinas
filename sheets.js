@@ -1,28 +1,6 @@
 // sheets.js
 // Camada que conversa com o Google Apps Script (que por sua vez lê/escreve o Google Sheets).
 
-const SESSION_STORAGE_KEY = "maquinas_session";
-
-function getSavedSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw);
-    if (!session.token || Date.now() > session.expiresAt) return null;
-    return session;
-  } catch (e) {
-    return null;
-  }
-}
-
-function saveSession(session) {
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-}
-
-function clearSession() {
-  localStorage.removeItem(SESSION_STORAGE_KEY);
-}
-
 function jsonpRequest(params) {
   return new Promise((resolve, reject) => {
     const callbackName = "jsonpCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
@@ -57,25 +35,11 @@ function jsonpRequest(params) {
   });
 }
 
-function requestLoginCode(email) {
-  return jsonpRequest({ action: "request-code", email });
-}
-
-function verifyLoginCode(email, code) {
-  return jsonpRequest({ action: "verify-code", email, code });
-}
-
-function checkSessionValid(token) {
-  return jsonpRequest({ action: "check-session", token }).then((r) => r.valid);
-}
-
 function fetchMachinesFromSheet() {
-  const session = getSavedSession();
-  return jsonpRequest({ action: "list", token: session ? session.token : "" }).then((data) => data.machines || []);
+  return jsonpRequest({ action: "list" }).then((data) => data.machines || []);
 }
 
 async function createMachineInSheet(payload) {
-  const session = getSavedSession();
   // Apps Script Web Apps respondem via um redirect interno do Google que o
   // navegador bloqueia por CORS ao tentar LER a resposta de um POST.
   // Solução: enviar em modo "no-cors" (o envio funciona normalmente,
@@ -85,7 +49,7 @@ async function createMachineInSheet(payload) {
     method: "POST",
     mode: "no-cors",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "create", token: session ? session.token : "", ...payload }),
+    body: JSON.stringify({ action: "create", ...payload }),
   });
 
   // dá um tempo pro Apps Script terminar de gravar (planilha + upload da foto no Drive)
@@ -94,12 +58,11 @@ async function createMachineInSheet(payload) {
 }
 
 async function updateMachineInSheet(payload) {
-  const session = getSavedSession();
   await fetch(CONFIG.API_URL, {
     method: "POST",
     mode: "no-cors",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "update", token: session ? session.token : "", ...payload }),
+    body: JSON.stringify({ action: "update", ...payload }),
   });
   await new Promise((resolve) => setTimeout(resolve, 1500));
   return { success: true };
